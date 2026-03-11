@@ -1,0 +1,16 @@
+{
+    "id": "odoo",
+    "name": "Odoo",
+    "description": "All-in-one business suite — ERP, CRM, eCommerce, Accounting",
+    "icon": "odoo.svg",
+    "supported_versions": ["18.0", "17.0", "16.0"],
+    "default_version": "18.0",
+    "requires": {
+        "database": "postgresql",
+        "min_ram_mb": 2048,
+        "min_cpu": 1,
+        "ports": [8069, 8072]
+    },
+    "deploy_modes": ["kubernetes", "vm"],
+    "helm_chart": "charts/odoo"
+}

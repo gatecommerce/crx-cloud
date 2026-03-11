@@ -1,0 +1,16 @@
+{
+    "id": "wordpress",
+    "name": "WordPress",
+    "description": "World's most popular CMS — blogs, sites, WooCommerce",
+    "icon": "wordpress.svg",
+    "supported_versions": ["6.8", "6.7", "6.6"],
+    "default_version": "6.8",
+    "requires": {
+        "database": "mysql",
+        "min_ram_mb": 512,
+        "min_cpu": 1,
+        "ports": [80, 443]
+    },
+    "deploy_modes": ["kubernetes", "vm"],
+    "helm_chart": "charts/wordpress"
+}

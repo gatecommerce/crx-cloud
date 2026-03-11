@@ -1,0 +1,16 @@
+{
+    "id": "prestashop",
+    "name": "PrestaShop",
+    "description": "Open-source eCommerce platform — strong in EU market",
+    "icon": "prestashop.svg",
+    "supported_versions": ["9.0", "8.2", "8.1"],
+    "default_version": "9.0",
+    "requires": {
+        "database": "mysql",
+        "min_ram_mb": 1024,
+        "min_cpu": 1,
+        "ports": [80, 443]
+    },
+    "deploy_modes": ["kubernetes", "vm"],
+    "helm_chart": "charts/prestashop"
+}
