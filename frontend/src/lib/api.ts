@@ -1,21 +1,19 @@
-import { getToken, logout } from "./auth";
-
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = getToken();
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(options?.headers as Record<string, string>),
-  };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(options?.headers as Record<string, string>),
+    },
+  });
 
   if (res.status === 401) {
-    logout();
+    if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login") && !window.location.pathname.startsWith("/auth")) {
+      window.location.href = "/login";
+    }
     throw new Error("Session expired");
   }
 
@@ -29,17 +27,9 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
 
 // Auth API
 export const authApi = {
-  login: (email: string, password: string) =>
-    apiFetch<{ access_token: string; token_type: string }>("/api/v1/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    }),
-  register: (email: string, password: string, full_name: string) =>
-    apiFetch<{ id: string; email: string; full_name: string }>("/api/v1/auth/register", {
-      method: "POST",
-      body: JSON.stringify({ email, password, full_name }),
-    }),
-  me: () => apiFetch<{ id: string; email: string; full_name: string; is_admin: boolean }>("/api/v1/auth/me"),
+  session: () => apiFetch<{ telegram_id: number; name: string; is_admin: boolean; lang: string }>("/api/v1/auth/session"),
+  refresh: () => apiFetch<{ ok: boolean }>("/api/v1/auth/refresh", { method: "POST" }),
+  logout: () => apiFetch<{ ok: boolean }>("/api/v1/auth/logout", { method: "POST" }),
 };
 
 // Server API

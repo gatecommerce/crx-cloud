@@ -1,38 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { authApi } from "@/lib/api";
-import { setToken, setUser } from "@/lib/auth";
+import { Send } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [isRegister, setIsRegister] = useState(false);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [checking, setChecking] = useState(true);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
+  // Check if already authenticated
+  useEffect(() => {
+    fetch("/api/v1/auth/session", { credentials: "include" })
+      .then((res) => {
+        if (res.ok) {
+          router.replace("/");
+        } else {
+          setChecking(false);
+        }
+      })
+      .catch(() => setChecking(false));
+  }, [router]);
 
-    try {
-      if (isRegister) {
-        await authApi.register(email, password, fullName);
-      }
-      const { access_token } = await authApi.login(email, password);
-      setToken(access_token);
-      const user = await authApi.me();
-      setUser(user);
-      router.push("/");
-    } catch (err: any) {
-      setError(err.message || "Authentication failed");
-    } finally {
-      setLoading(false);
-    }
+  if (checking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[var(--background)]">
+        <div className="w-8 h-8 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
   }
 
   return (
@@ -47,73 +41,43 @@ export default function LoginPage() {
           <p className="text-sm text-[var(--muted)] mt-1">AI-Powered Hosting Panel</p>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-6 space-y-4">
-          <h2 className="text-lg font-semibold text-center">
-            {isRegister ? "Create Account" : "Sign In"}
-          </h2>
-
-          {error && (
-            <div className="text-sm text-[var(--danger)] bg-[var(--danger)]/10 border border-[var(--danger)]/20 rounded-lg px-3 py-2">
-              {error}
-            </div>
-          )}
-
-          {isRegister && (
-            <div>
-              <label className="block text-xs text-[var(--muted)] mb-1.5">Full Name</label>
-              <input
-                type="text"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                className="w-full bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--accent)]"
-                required
-              />
-            </div>
-          )}
-
-          <div>
-            <label className="block text-xs text-[var(--muted)] mb-1.5">Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--accent)]"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs text-[var(--muted)] mb-1.5">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--accent)]"
-              required
-              minLength={6}
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
-          >
-            {loading ? "..." : isRegister ? "Create Account" : "Sign In"}
-          </button>
-
-          <p className="text-center text-xs text-[var(--muted)]">
-            {isRegister ? "Already have an account?" : "Don't have an account?"}{" "}
-            <button
-              type="button"
-              onClick={() => { setIsRegister(!isRegister); setError(""); }}
-              className="text-[var(--accent)] hover:underline"
-            >
-              {isRegister ? "Sign In" : "Register"}
-            </button>
+        {/* Telegram Login */}
+        <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-6 text-center">
+          <h2 className="text-lg font-semibold mb-2">Accedi con Telegram</h2>
+          <p className="text-sm text-[var(--muted)] mb-6">
+            Accesso sicuro senza password. Apri il bot Telegram e clicca su &quot;CRX Cloud&quot; per ricevere il link di accesso.
           </p>
-        </form>
+
+          {/* Telegram button */}
+          <a
+            href="https://t.me/crx_vito_bot"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-6 py-3 bg-[#2AABEE] hover:bg-[#229ED9] rounded-lg text-sm font-medium transition-colors text-white"
+          >
+            <Send size={18} />
+            Apri Telegram Bot
+          </a>
+
+          <div className="mt-6 pt-4 border-t border-[var(--border)]">
+            <p className="text-xs text-[var(--muted)]">
+              Il bot ti inviera un link sicuro per accedere al pannello.
+              <br />
+              Il link scade dopo 60 minuti e puo essere usato una sola volta.
+            </p>
+          </div>
+        </div>
+
+        {/* Security info */}
+        <div className="mt-4 text-center">
+          <div className="flex items-center justify-center gap-2 text-xs text-[var(--muted)]">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            Connessione sicura — nessuna password salvata
+          </div>
+        </div>
       </div>
     </div>
   );

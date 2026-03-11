@@ -1,13 +1,12 @@
 """Server management endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from api.models.server import Server
-from api.models.user import User
 from core.auth import get_current_user
 from core.database import get_db
 from core.k8s_controller import KubernetesDriver
@@ -16,12 +15,10 @@ from core.server_manager import ServerInfo, ServerType
 
 router = APIRouter()
 
-# Driver registry
 _drivers = {"kubernetes": KubernetesDriver(), "vm": VMDriver()}
 
 
 def _to_server_info(srv: Server) -> ServerInfo:
-    """Convert DB model to driver's ServerInfo."""
     return ServerInfo(
         id=srv.id, name=srv.name,
         server_type=ServerType(srv.server_type), provider=srv.provider,
@@ -38,7 +35,7 @@ def _to_server_info(srv: Server) -> ServerInfo:
 
 class ServerCreate(BaseModel):
     name: str
-    server_type: str  # kubernetes | vm
+    server_type: str
     provider: str
     endpoint: str
     region: str | None = None
@@ -61,12 +58,12 @@ class ServerResponse(BaseModel):
 
 @router.get("/", response_model=list[ServerResponse])
 async def list_servers(
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
-    """List all connected servers."""
     result = await db.execute(
-        select(Server).options(selectinload(Server.instances)).where(Server.owner_id == user.id)
+        select(Server).options(selectinload(Server.instances)).where(Server.owner_id == user["telegram_id"])
     )
     servers = result.scalars().all()
     return [
@@ -82,17 +79,16 @@ async def list_servers(
 @router.post("/", response_model=ServerResponse)
 async def add_server(
     body: ServerCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
-    """Connect a new server — validates connectivity first."""
     srv = Server(
         name=body.name, server_type=body.server_type, provider=body.provider,
         endpoint=body.endpoint, region=body.region, ssh_user=body.ssh_user,
         ssh_key_path=body.ssh_key_path, kubeconfig=body.kubeconfig,
-        namespace=body.namespace, status="provisioning", owner_id=user.id,
+        namespace=body.namespace, status="provisioning", owner_id=user["telegram_id"],
     )
-    # Test connection
     driver = _drivers.get(body.server_type)
     if not driver:
         raise HTTPException(status_code=400, detail=f"Unknown server type: {body.server_type}")
@@ -115,13 +111,13 @@ async def add_server(
 @router.get("/{server_id}", response_model=ServerResponse)
 async def get_server(
     server_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
-    """Get server details."""
     result = await db.execute(
         select(Server).options(selectinload(Server.instances))
-        .where(Server.id == server_id, Server.owner_id == user.id)
+        .where(Server.id == server_id, Server.owner_id == user["telegram_id"])
     )
     srv = result.scalar_one_or_none()
     if not srv:
@@ -136,12 +132,12 @@ async def get_server(
 @router.get("/{server_id}/metrics")
 async def get_server_metrics(
     server_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
-    """Get real-time server metrics."""
     result = await db.execute(
-        select(Server).where(Server.id == server_id, Server.owner_id == user.id)
+        select(Server).where(Server.id == server_id, Server.owner_id == user["telegram_id"])
     )
     srv = result.scalar_one_or_none()
     if not srv:
@@ -156,12 +152,12 @@ async def get_server_metrics(
 @router.delete("/{server_id}")
 async def remove_server(
     server_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
-    """Disconnect a server."""
     result = await db.execute(
-        select(Server).where(Server.id == server_id, Server.owner_id == user.id)
+        select(Server).where(Server.id == server_id, Server.owner_id == user["telegram_id"])
     )
     srv = result.scalar_one_or_none()
     if not srv:

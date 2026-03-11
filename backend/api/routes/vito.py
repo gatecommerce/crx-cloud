@@ -1,12 +1,11 @@
 """Vito (CRX Team AI) bridge endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 import httpx
 from loguru import logger
 
-from api.models.user import User
 from core.auth import get_current_user
 from core.config import settings
 
@@ -15,7 +14,7 @@ router = APIRouter()
 
 class VitoMessage(BaseModel):
     message: str
-    context: dict = {}  # server_id, instance_id, etc.
+    context: dict = {}
 
 
 class VitoResponse(BaseModel):
@@ -27,17 +26,16 @@ class VitoResponse(BaseModel):
 @router.post("/chat", response_model=VitoResponse)
 async def chat_with_vito(
     msg: VitoMessage,
-    user: User = Depends(get_current_user),
+    request: Request,
+    user: dict = Depends(get_current_user),
 ):
-    """Send a message to Vito (CRX Team) and get AI-powered response."""
     if not settings.crx_team_api_url:
         raise HTTPException(status_code=503, detail="CRX Team not configured")
 
-    # Build enriched context for Vito
     cloud_context = {
         "source": "crx-cloud-panel",
-        "user_email": user.email,
-        "user_name": user.full_name,
+        "user_telegram_id": user["telegram_id"],
+        "user_name": user["name"],
         **msg.context,
     }
 
@@ -60,7 +58,7 @@ async def chat_with_vito(
         logger.warning("CRX Team API unreachable")
         return VitoResponse(
             reply="Vito non e' raggiungibile al momento. Verifica che CRX Team sia attivo.",
-            suggestions=["Controlla che CRX Team sia in esecuzione", "Verifica CRX_TEAM_API_URL"],
+            suggestions=["Controlla che CRX Team sia in esecuzione"],
         )
     except httpx.HTTPStatusError as e:
         logger.error(f"CRX Team API error: {e.response.status_code}")

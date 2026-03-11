@@ -2,18 +2,30 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { isAuthenticated } from "@/lib/auth";
+import { authApi } from "@/lib/api";
+
+interface UserSession {
+  telegram_id: number;
+  name: string;
+  is_admin: boolean;
+  lang: string;
+}
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [checked, setChecked] = useState(false);
+  const [user, setUser] = useState<UserSession | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.replace("/login");
-    } else {
-      setChecked(true);
-    }
+    authApi
+      .session()
+      .then((session) => {
+        setUser(session);
+        setChecked(true);
+      })
+      .catch(() => {
+        router.replace("/login");
+      });
   }, [router]);
 
   if (!checked) {

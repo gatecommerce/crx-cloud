@@ -1,13 +1,12 @@
 """CMS instance management endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.models.instance import Instance
 from api.models.server import Server
-from api.models.user import User
 from core.auth import get_current_user
 from core.database import get_db
 
@@ -16,7 +15,7 @@ router = APIRouter()
 
 class InstanceCreate(BaseModel):
     server_id: str
-    cms_type: str  # odoo, wordpress, prestashop, woocommerce
+    cms_type: str
     version: str
     name: str
     domain: str = ""
@@ -43,11 +42,11 @@ class InstanceResponse(BaseModel):
 @router.get("/", response_model=list[InstanceResponse])
 async def list_instances(
     server_id: str | None = None,
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
-    """List all CMS instances (optionally filtered by server)."""
-    query = select(Instance).where(Instance.owner_id == user.id)
+    query = select(Instance).where(Instance.owner_id == user["telegram_id"])
     if server_id:
         query = query.where(Instance.server_id == server_id)
     result = await db.execute(query)
@@ -66,13 +65,12 @@ async def list_instances(
 @router.post("/", response_model=InstanceResponse, status_code=201)
 async def create_instance(
     body: InstanceCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
-    """Deploy a new CMS instance on a server."""
-    # Verify server ownership
     srv = await db.execute(
-        select(Server).where(Server.id == body.server_id, Server.owner_id == user.id)
+        select(Server).where(Server.id == body.server_id, Server.owner_id == user["telegram_id"])
     )
     if not srv.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Server not found")
@@ -81,14 +79,11 @@ async def create_instance(
         name=body.name, cms_type=body.cms_type, version=body.version,
         server_id=body.server_id, domain=body.domain, status="deploying",
         workers=body.workers, ram_mb=body.ram_mb, cpu_cores=body.cpu_cores,
-        config=body.config, owner_id=user.id,
+        config=body.config, owner_id=user["telegram_id"],
     )
     db.add(instance)
     await db.commit()
     await db.refresh(instance)
-
-    # TODO: trigger async deploy via plugin driver
-    # asyncio.create_task(deploy_instance_async(instance))
 
     return InstanceResponse(
         id=instance.id, server_id=instance.server_id, cms_type=instance.cms_type,
@@ -101,12 +96,12 @@ async def create_instance(
 @router.get("/{instance_id}", response_model=InstanceResponse)
 async def get_instance(
     instance_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
-    """Get instance details."""
     result = await db.execute(
-        select(Instance).where(Instance.id == instance_id, Instance.owner_id == user.id)
+        select(Instance).where(Instance.id == instance_id, Instance.owner_id == user["telegram_id"])
     )
     inst = result.scalar_one_or_none()
     if not inst:
@@ -122,17 +117,16 @@ async def get_instance(
 @router.post("/{instance_id}/restart")
 async def restart_instance(
     instance_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
-    """Restart a CMS instance."""
     result = await db.execute(
-        select(Instance).where(Instance.id == instance_id, Instance.owner_id == user.id)
+        select(Instance).where(Instance.id == instance_id, Instance.owner_id == user["telegram_id"])
     )
     inst = result.scalar_one_or_none()
     if not inst:
         raise HTTPException(status_code=404, detail="Instance not found")
-    # TODO: call plugin driver restart
     return {"detail": f"Restart triggered for {inst.name}"}
 
 
@@ -140,36 +134,34 @@ async def restart_instance(
 async def scale_instance(
     instance_id: str,
     workers: int = 2,
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
-    """Scale instance workers."""
     result = await db.execute(
-        select(Instance).where(Instance.id == instance_id, Instance.owner_id == user.id)
+        select(Instance).where(Instance.id == instance_id, Instance.owner_id == user["telegram_id"])
     )
     inst = result.scalar_one_or_none()
     if not inst:
         raise HTTPException(status_code=404, detail="Instance not found")
     inst.workers = workers
     await db.commit()
-    # TODO: call driver to actually scale
     return {"detail": f"Scaled {inst.name} to {workers} workers"}
 
 
 @router.delete("/{instance_id}")
 async def delete_instance(
     instance_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
-    """Remove a CMS instance."""
     result = await db.execute(
-        select(Instance).where(Instance.id == instance_id, Instance.owner_id == user.id)
+        select(Instance).where(Instance.id == instance_id, Instance.owner_id == user["telegram_id"])
     )
     inst = result.scalar_one_or_none()
     if not inst:
         raise HTTPException(status_code=404, detail="Instance not found")
-    # TODO: call plugin driver to undeploy first
     await db.delete(inst)
     await db.commit()
     return {"detail": f"Instance {inst.name} removed"}

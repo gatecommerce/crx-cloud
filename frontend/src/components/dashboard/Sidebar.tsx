@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { getUser, logout } from "@/lib/auth";
+import { authApi } from "@/lib/api";
 import {
   Server, Box, Database, Globe, Activity, Puzzle,
   ChevronLeft, ChevronRight, LogOut, User
@@ -20,8 +20,16 @@ const navItems = [
 
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
+  const [userName, setUserName] = useState("");
   const pathname = usePathname();
-  const user = getUser();
+
+  useEffect(() => {
+    authApi.session().then((s) => setUserName(s.name || `ID: ${s.telegram_id}`)).catch(() => {});
+  }, []);
+
+  function handleLogout() {
+    authApi.logout().finally(() => { window.location.href = "/login"; });
+  }
 
   return (
     <aside
@@ -59,13 +67,13 @@ export function Sidebar() {
 
       {/* User + Collapse */}
       <div className="border-t border-[var(--border)]">
-        {user && !collapsed && (
+        {userName && !collapsed && (
           <div className="px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2 min-w-0">
               <User size={14} className="text-[var(--muted)] shrink-0" />
-              <span className="text-xs text-[var(--muted)] truncate">{user.email}</span>
+              <span className="text-xs text-[var(--muted)] truncate">{userName}</span>
             </div>
-            <button onClick={logout} className="text-[var(--muted)] hover:text-[var(--danger)]">
+            <button onClick={handleLogout} className="text-[var(--muted)] hover:text-[var(--danger)]">
               <LogOut size={14} />
             </button>
           </div>

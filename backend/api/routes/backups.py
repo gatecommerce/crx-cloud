@@ -1,13 +1,12 @@
 """Backup management endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.models.backup import Backup
 from api.models.instance import Instance
-from api.models.user import User
 from core.auth import get_current_user
 from core.database import get_db
 
@@ -27,14 +26,14 @@ class BackupResponse(BaseModel):
 @router.get("/", response_model=list[BackupResponse])
 async def list_backups(
     instance_id: str | None = None,
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
-    """List backups, optionally filtered by instance."""
     query = (
         select(Backup)
         .join(Instance, Backup.instance_id == Instance.id)
-        .where(Instance.owner_id == user.id)
+        .where(Instance.owner_id == user["telegram_id"])
     )
     if instance_id:
         query = query.where(Backup.instance_id == instance_id)
@@ -53,12 +52,12 @@ async def list_backups(
 @router.post("/{instance_id}", status_code=201)
 async def create_backup(
     instance_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
-    """Trigger a manual backup for an instance."""
     result = await db.execute(
-        select(Instance).where(Instance.id == instance_id, Instance.owner_id == user.id)
+        select(Instance).where(Instance.id == instance_id, Instance.owner_id == user["telegram_id"])
     )
     inst = result.scalar_one_or_none()
     if not inst:
@@ -71,24 +70,22 @@ async def create_backup(
     db.add(backup)
     await db.commit()
     await db.refresh(backup)
-    # TODO: trigger async backup via plugin driver
     return {"id": backup.id, "status": "pending", "detail": f"Backup triggered for {inst.name}"}
 
 
 @router.post("/{backup_id}/restore")
 async def restore_backup(
     backup_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
-    """Restore an instance from a backup."""
     result = await db.execute(
         select(Backup)
         .join(Instance, Backup.instance_id == Instance.id)
-        .where(Backup.id == backup_id, Instance.owner_id == user.id)
+        .where(Backup.id == backup_id, Instance.owner_id == user["telegram_id"])
     )
     backup = result.scalar_one_or_none()
     if not backup:
         raise HTTPException(status_code=404, detail="Backup not found")
-    # TODO: trigger async restore via plugin driver
     return {"detail": f"Restore triggered from backup {backup.id}"}
