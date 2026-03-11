@@ -1,29 +1,67 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { serversApi, instancesApi, backupsApi } from "@/lib/api";
+import { Server, Box, Database, AlertTriangle } from "lucide-react";
+
+interface Stats {
+  servers: number;
+  instances: number;
+  backups: number;
+  alerts: number;
+}
+
 export function StatsBar() {
-  const stats = [
-    { label: "Servers", value: "3", status: "online" },
-    { label: "Instances", value: "7", status: "running" },
-    { label: "Backups Today", value: "12", status: "ok" },
-    { label: "Alerts", value: "1", status: "warning" },
+  const [stats, setStats] = useState<Stats>({ servers: 0, instances: 0, backups: 0, alerts: 0 });
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const [servers, instances, backups] = await Promise.all([
+          serversApi.list().catch(() => []),
+          instancesApi.list().catch(() => []),
+          backupsApi.list().catch(() => []),
+        ]);
+        const errorCount = [
+          ...servers.filter((s: any) => s.status === "error"),
+          ...instances.filter((i: any) => i.status === "error"),
+        ].length;
+        setStats({
+          servers: servers.length,
+          instances: instances.length,
+          backups: backups.length,
+          alerts: errorCount,
+        });
+      } catch {
+        // keep defaults
+      }
+    }
+    load();
+    const interval = setInterval(load, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const items = [
+    { icon: Server, label: "Servers", value: stats.servers, ok: true },
+    { icon: Box, label: "Instances", value: stats.instances, ok: true },
+    { icon: Database, label: "Backups", value: stats.backups, ok: true },
+    { icon: AlertTriangle, label: "Alerts", value: stats.alerts, ok: stats.alerts === 0 },
   ];
 
   return (
     <header className="border-b border-[var(--border)] bg-[var(--card)] px-6 py-3">
       <div className="flex items-center gap-8">
-        {stats.map((stat) => (
-          <div key={stat.label} className="flex items-center gap-2">
-            <div
-              className={`w-2 h-2 rounded-full ${
-                stat.status === "warning" ? "bg-[var(--warning)]" : "bg-[var(--success)]"
-              }`}
-            />
-            <span className="text-sm text-[var(--muted)]">{stat.label}</span>
-            <span className="text-sm font-semibold">{stat.value}</span>
-          </div>
-        ))}
-
-        <div className="ml-auto text-xs text-[var(--muted)]">
-          cloud.crx.team
-        </div>
+        {items.map((item) => {
+          const Icon = item.icon;
+          return (
+            <div key={item.label} className="flex items-center gap-2">
+              <Icon size={14} className={item.ok ? "text-[var(--success)]" : "text-[var(--warning)]"} />
+              <span className="text-sm text-[var(--muted)]">{item.label}</span>
+              <span className="text-sm font-semibold">{item.value}</span>
+            </div>
+          );
+        })}
+        <div className="ml-auto text-xs text-[var(--muted)]">cloud.crx.team</div>
       </div>
     </header>
   );
