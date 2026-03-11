@@ -4,6 +4,8 @@ COPY package*.json ./
 RUN npm ci
 COPY . .
 RUN mkdir -p public
+ARG API_URL_INTERNAL=http://backend:8080
+ENV API_URL_INTERNAL=${API_URL_INTERNAL}
 RUN npm run build
 
 FROM node:22-alpine AS runner
