@@ -1,20 +1,37 @@
 """CRX Cloud — AI-Powered Multi-CMS Hosting Panel API."""
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from loguru import logger
 
 from api.routes import servers, instances, backups, plugins, health, vito, auth
 from core.config import settings
 from core.database import init_db
 
 
+async def _wait_for_db(max_retries: int = 15, delay: float = 2.0):
+    """Wait for PostgreSQL to be ready before creating tables."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            await init_db()
+            logger.info(f"Database ready (attempt {attempt})")
+            return
+        except Exception as e:
+            if attempt == max_retries:
+                logger.error(f"Database not ready after {max_retries} attempts: {e}")
+                raise
+            logger.warning(f"DB not ready (attempt {attempt}/{max_retries}), retrying in {delay}s...")
+            await asyncio.sleep(delay)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown events."""
     if settings.app_env == "dev":
-        await init_db()
+        await _wait_for_db()
     yield
 
 
