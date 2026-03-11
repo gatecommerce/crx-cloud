@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { AuthGuard } from "@/components/AuthGuard";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { StatsBar } from "@/components/dashboard/StatsBar";
@@ -8,7 +9,7 @@ import { VitoChat } from "@/components/dashboard/VitoChat";
 import { instancesApi, serversApi } from "@/lib/api";
 import {
   Box, Plus, RefreshCw, Play, Square, RotateCcw, Trash2,
-  ExternalLink, Cpu, MemoryStick, Users
+  ExternalLink, Cpu, MemoryStick, Users, Loader2
 } from "lucide-react";
 
 const statusColors: Record<string, string> = {
@@ -39,14 +40,15 @@ interface Instance {
   ram_mb: number;
   cpu_cores: number;
   server_id: string;
-  created_at: string;
 }
 
 export default function InstancesPage() {
+  const router = useRouter();
   const [instances, setInstances] = useState<Instance[]>([]);
   const [servers, setServers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showDeploy, setShowDeploy] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -63,24 +65,33 @@ export default function InstancesPage() {
 
   useEffect(() => {
     loadData();
+    const interval = setInterval(loadData, 15000);
+    return () => clearInterval(interval);
   }, [loadData]);
 
-  async function handleRestart(id: string) {
+  async function handleAction(id: string, action: "restart" | "stop" | "start") {
+    setActionLoading(`${id}-${action}`);
     try {
-      await instancesApi.restart(id);
-      loadData();
+      await instancesApi[action](id);
+      await loadData();
     } catch (err: any) {
       alert(err.message);
+    } finally {
+      setActionLoading(null);
     }
   }
 
-  async function handleDelete(id: string, name: string) {
+  async function handleDelete(e: React.MouseEvent, id: string, name: string) {
+    e.stopPropagation();
     if (!confirm(`Delete instance "${name}"? This cannot be undone.`)) return;
+    setActionLoading(`${id}-delete`);
     try {
       await instancesApi.remove(id);
       setInstances((prev) => prev.filter((i) => i.id !== id));
     } catch (err: any) {
       alert(err.message);
+    } finally {
+      setActionLoading(null);
     }
   }
 
@@ -131,13 +142,19 @@ export default function InstancesPage() {
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {instances.map((inst) => {
                     const cms = cmsLogos[inst.cms_type] || cmsLogos.custom;
+                    const isDeploying = inst.status === "deploying";
                     return (
-                      <div key={inst.id} className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 hover:border-[var(--accent)]/30 transition-colors">
+                      <div
+                        key={inst.id}
+                        onClick={() => router.push(`/instances/${inst.id}`)}
+                        className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 hover:border-[var(--accent)]/30 transition-colors cursor-pointer"
+                      >
                         {/* Header */}
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center gap-2">
                             <div className={`w-2.5 h-2.5 rounded-full ${statusColors[inst.status]}`} />
                             <h3 className="font-semibold text-sm">{inst.name}</h3>
+                            {isDeploying && <Loader2 size={12} className="animate-spin text-[var(--warning)]" />}
                           </div>
                           <span className={`text-xs font-medium ${cms.color}`}>{cms.label} {inst.version}</span>
                         </div>
@@ -147,7 +164,13 @@ export default function InstancesPage() {
                           {inst.domain && (
                             <div className="flex items-center gap-2 text-xs">
                               <ExternalLink size={12} className="text-[var(--muted)]" />
-                              <a href={inst.url || `https://${inst.domain}`} target="_blank" rel="noopener" className="text-[var(--accent)] hover:underline truncate">
+                              <a
+                                href={inst.url || `https://${inst.domain}`}
+                                target="_blank"
+                                rel="noopener"
+                                className="text-[var(--accent)] hover:underline truncate"
+                                onClick={(e) => e.stopPropagation()}
+                              >
                                 {inst.domain}
                               </a>
                             </div>
@@ -163,18 +186,43 @@ export default function InstancesPage() {
                         </div>
 
                         {/* Actions */}
-                        <div className="flex gap-2 border-t border-[var(--border)] pt-3">
+                        <div className="flex gap-2 border-t border-[var(--border)] pt-3" onClick={(e) => e.stopPropagation()}>
+                          {inst.status === "running" ? (
+                            <>
+                              <button
+                                onClick={() => handleAction(inst.id, "restart")}
+                                disabled={!!actionLoading}
+                                className="flex-1 flex items-center justify-center gap-1 text-xs py-1.5 rounded-md bg-[var(--background)] hover:bg-[var(--border)] transition-colors disabled:opacity-50"
+                              >
+                                {actionLoading === `${inst.id}-restart` ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />} Restart
+                              </button>
+                              <button
+                                onClick={() => handleAction(inst.id, "stop")}
+                                disabled={!!actionLoading}
+                                className="flex-1 flex items-center justify-center gap-1 text-xs py-1.5 rounded-md bg-[var(--background)] hover:bg-[var(--border)] transition-colors text-[var(--warning)] disabled:opacity-50"
+                              >
+                                {actionLoading === `${inst.id}-stop` ? <Loader2 size={12} className="animate-spin" /> : <Square size={12} />} Stop
+                              </button>
+                            </>
+                          ) : inst.status === "stopped" ? (
+                            <button
+                              onClick={() => handleAction(inst.id, "start")}
+                              disabled={!!actionLoading}
+                              className="flex-1 flex items-center justify-center gap-1 text-xs py-1.5 rounded-md bg-[var(--success)]/10 text-[var(--success)] hover:bg-[var(--success)]/20 transition-colors disabled:opacity-50"
+                            >
+                              {actionLoading === `${inst.id}-start` ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Start
+                            </button>
+                          ) : (
+                            <div className="flex-1 text-center text-xs py-1.5 text-[var(--muted)]">
+                              {inst.status === "deploying" ? "Deploying..." : inst.status}
+                            </div>
+                          )}
                           <button
-                            onClick={() => handleRestart(inst.id)}
-                            className="flex-1 flex items-center justify-center gap-1 text-xs py-1.5 rounded-md bg-[var(--background)] hover:bg-[var(--border)] transition-colors"
+                            onClick={(e) => handleDelete(e, inst.id, inst.name)}
+                            disabled={!!actionLoading}
+                            className="flex items-center justify-center gap-1 text-xs py-1.5 px-3 rounded-md text-[var(--danger)] hover:bg-[var(--danger)]/10 transition-colors disabled:opacity-50"
                           >
-                            <RotateCcw size={12} /> Restart
-                          </button>
-                          <button
-                            onClick={() => handleDelete(inst.id, inst.name)}
-                            className="flex items-center justify-center gap-1 text-xs py-1.5 px-3 rounded-md text-[var(--danger)] hover:bg-[var(--danger)]/10 transition-colors"
-                          >
-                            <Trash2 size={12} />
+                            {actionLoading === `${inst.id}-delete` ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
                           </button>
                         </div>
                       </div>

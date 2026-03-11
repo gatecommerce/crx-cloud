@@ -51,8 +51,12 @@ export const instancesApi = {
   create: (data: { name: string; cms_type: string; version: string; server_id: string; domain?: string; workers?: number; ram_mb?: number; cpu_cores?: number }) =>
     apiFetch<any>("/api/v1/instances/", { method: "POST", body: JSON.stringify(data) }),
   restart: (id: string) => apiFetch<any>(`/api/v1/instances/${id}/restart`, { method: "POST" }),
+  stop: (id: string) => apiFetch<any>(`/api/v1/instances/${id}/stop`, { method: "POST" }),
+  start: (id: string) => apiFetch<any>(`/api/v1/instances/${id}/start`, { method: "POST" }),
+  health: (id: string) => apiFetch<any>(`/api/v1/instances/${id}/health`),
+  logs: (id: string, lines: number = 100) => apiFetch<any>(`/api/v1/instances/${id}/logs?lines=${lines}`),
   scale: (id: string, workers: number) =>
-    apiFetch<any>(`/api/v1/instances/${id}/scale`, { method: "POST", body: JSON.stringify({ workers }) }),
+    apiFetch<any>(`/api/v1/instances/${id}/scale?workers=${workers}`, { method: "POST" }),
   remove: (id: string) => apiFetch<void>(`/api/v1/instances/${id}`, { method: "DELETE" }),
 };
 

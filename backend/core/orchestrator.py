@@ -16,6 +16,7 @@ from api.models.server import Server
 from api.models.backup import Backup
 from plugins.base import CMSPlugin, CMSInstance
 from plugins.odoo.driver import OdooPlugin
+from core.nginx_manager import setup_nginx, remove_nginx, NginxConfig
 
 # Registry of available CMS plugins
 _plugins: dict[str, CMSPlugin] = {
@@ -115,6 +116,29 @@ async def deploy_instance(inst: Instance, server: Server, db: AsyncSession) -> N
         await db.commit()
         logger.info(f"Instance {inst.name} deployed successfully: {inst.url}")
 
+        # Configure Nginx reverse proxy if domain is set
+        if inst.domain:
+            try:
+                nginx_ok = await setup_nginx(
+                    host=server.endpoint,
+                    ssh_user=server.ssh_user or "root",
+                    ssh_key_path=server.ssh_key_path or "",
+                    config=NginxConfig(
+                        domain=inst.domain,
+                        upstream_port=port,
+                        instance_name=inst.name,
+                        ssl=True,
+                    ),
+                )
+                if nginx_ok:
+                    inst.url = f"https://{inst.domain}"
+                    await db.commit()
+                    logger.info(f"Nginx configured for {inst.domain}")
+                else:
+                    logger.warning(f"Nginx setup failed for {inst.domain}, instance accessible via direct port")
+            except Exception as e:
+                logger.warning(f"Nginx setup error for {inst.domain}: {e}")
+
     except Exception as e:
         logger.error(f"Deploy failed for {inst.name}: {e}")
         inst.status = "error"
@@ -155,7 +179,21 @@ async def remove_instance(inst: Instance, server: Server) -> bool:
     if not plugin:
         return False
     cms = _db_to_cms_instance(inst, server)
-    return await plugin.remove(cms)
+    result = await plugin.remove(cms)
+
+    # Cleanup Nginx config
+    if inst.domain:
+        try:
+            await remove_nginx(
+                host=server.endpoint,
+                ssh_user=server.ssh_user or "root",
+                ssh_key_path=server.ssh_key_path or "",
+                instance_name=inst.name,
+            )
+        except Exception as e:
+            logger.warning(f"Nginx cleanup failed for {inst.name}: {e}")
+
+    return result
 
 
 async def backup_instance(inst: Instance, server: Server, backup: Backup, db: AsyncSession) -> None:
