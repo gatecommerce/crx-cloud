@@ -18,10 +18,10 @@ class Settings(BaseSettings):
     session_ttl_hours: int = 24
     token_ttl_minutes: int = 60
 
-    # Cookie
+    # Cookie — secure=False in dev so cookies work on http://localhost
     cookie_name: str = "crx_cloud_session"
-    cookie_secure: bool = True
-    cookie_samesite: str = "strict"
+    cookie_secure: bool = os.getenv("APP_ENV", "dev") != "dev"
+    cookie_samesite: str = "lax" if os.getenv("APP_ENV", "dev") == "dev" else "strict"
 
     # Telegram
     telegram_bot_token: str = ""

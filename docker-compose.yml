@@ -8,6 +8,7 @@ services:
       - "3001:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8080
+      - API_URL_INTERNAL=http://backend:8080
     volumes:
       - ./frontend/src:/app/src
     depends_on:
@@ -22,6 +23,7 @@ services:
     environment:
       - APP_ENV=dev
       - DATABASE_URL=postgresql+asyncpg://crxcloud:crxcloud@db:5432/crxcloud
+      - JWT_SECRET=dev-jwt-secret-change-in-prod
     volumes:
       - ./backend:/app
     depends_on:

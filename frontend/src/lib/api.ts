@@ -1,7 +1,8 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+// All API calls go through Next.js rewrites (/api/* → backend)
+// This keeps cookies same-origin and works in Docker
 
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(path, {
     ...options,
     credentials: "include",
     headers: {

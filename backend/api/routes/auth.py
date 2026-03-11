@@ -152,7 +152,59 @@ async def logout(response: Response):
     return {"ok": True}
 
 
-# --- Dev-only: generate test token ---
+# --- Internal: bot creates one-time tokens ---
+
+class CreateTokenRequest(BaseModel):
+    telegram_id: int
+    name: str = ""
+    is_admin: bool = False
+    language: str = "it"
+
+
+class CreateTokenResult(BaseModel):
+    token: str
+    url: str
+
+
+@router.post("/internal/create-token", response_model=CreateTokenResult)
+async def internal_create_token(body: CreateTokenRequest, request: Request):
+    """Internal endpoint for crx-team bot to create one-time tokens.
+
+    Secured by X-Internal-Key header matching CRX_CLOUD_INTERNAL_KEY env var.
+    """
+    expected_key = settings.crx_team_api_key
+    if not expected_key:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="internal_key_not_configured")
+
+    provided_key = request.headers.get("X-Internal-Key", "")
+    if provided_key != expected_key:
+        logger.warning(f"Invalid internal key from {request.client.host if request.client else 'unknown'}")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid_key")
+
+    token = create_one_time_token(
+        telegram_id=body.telegram_id,
+        name=body.name,
+        is_admin=body.is_admin,
+        language=body.language,
+    )
+
+    # Build the login URL
+    base = f"https://{settings.domain}" if settings.app_env != "dev" else "http://localhost:3000"
+    url = f"{base}/auth?token={token}"
+
+    logger.info(f"Internal token created for telegram_id={body.telegram_id}")
+    return CreateTokenResult(token=token, url=url)
+
+
+# --- Dev-only ---
+@router.get("/dev-check")
+async def dev_check():
+    """Returns 200 if backend is in dev mode, 404 otherwise."""
+    if settings.app_env != "dev":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return {"dev": True}
+
+
 @router.post("/dev-token", response_model=AuthResult)
 async def dev_token(response: Response):
     """DEV ONLY: Create a test session for the owner. Disabled in prod."""

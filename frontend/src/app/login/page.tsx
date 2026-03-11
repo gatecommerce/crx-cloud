@@ -2,13 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Send } from "lucide-react";
+import { Send, Terminal } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
   const [checking, setChecking] = useState(true);
+  const [devLoading, setDevLoading] = useState(false);
+  const [showDevLogin, setShowDevLogin] = useState(false);
 
-  // Check if already authenticated
+  // Check if already authenticated + detect dev mode from backend
   useEffect(() => {
     fetch("/api/v1/auth/session", { credentials: "include" })
       .then((res) => {
@@ -19,7 +21,31 @@ export default function LoginPage() {
         }
       })
       .catch(() => setChecking(false));
+
+    // Check if backend is in dev mode
+    fetch("/api/v1/auth/dev-check")
+      .then((res) => { if (res.ok) setShowDevLogin(true); })
+      .catch(() => {});
   }, [router]);
+
+  const handleDevLogin = async () => {
+    setDevLoading(true);
+    try {
+      const res = await fetch("/api/v1/auth/dev-token", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (res.ok) {
+        router.replace("/");
+      } else {
+        alert("Dev login failed — backend non in modalita dev");
+        setDevLoading(false);
+      }
+    } catch {
+      alert("Cannot reach backend");
+      setDevLoading(false);
+    }
+  };
 
   if (checking) {
     return (
@@ -58,6 +84,23 @@ export default function LoginPage() {
             <Send size={18} />
             Apri Telegram Bot
           </a>
+
+          {/* Dev login — appears only if backend is in dev mode */}
+          {showDevLogin && (
+            <div className="mt-4 pt-4 border-t border-[var(--border)]">
+              <button
+                onClick={handleDevLogin}
+                disabled={devLoading}
+                className="inline-flex items-center gap-2 px-6 py-3 bg-[var(--warning)] hover:opacity-90 rounded-lg text-sm font-medium transition-colors text-black disabled:opacity-50"
+              >
+                <Terminal size={18} />
+                {devLoading ? "Accesso..." : "Dev Login (Test)"}
+              </button>
+              <p className="text-xs text-[var(--muted)] mt-2">
+                Solo in ambiente di sviluppo
+              </p>
+            </div>
+          )}
 
           <div className="mt-6 pt-4 border-t border-[var(--border)]">
             <p className="text-xs text-[var(--muted)]">
