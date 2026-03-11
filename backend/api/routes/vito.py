@@ -1,10 +1,13 @@
 """Vito (CRX Team AI) bridge endpoints."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 import httpx
+from loguru import logger
 
+from api.models.user import User
+from core.auth import get_current_user
 from core.config import settings
 
 router = APIRouter()
@@ -22,16 +25,46 @@ class VitoResponse(BaseModel):
 
 
 @router.post("/chat", response_model=VitoResponse)
-async def chat_with_vito(msg: VitoMessage):
+async def chat_with_vito(
+    msg: VitoMessage,
+    user: User = Depends(get_current_user),
+):
     """Send a message to Vito (CRX Team) and get AI-powered response."""
     if not settings.crx_team_api_url:
         raise HTTPException(status_code=503, detail="CRX Team not configured")
 
-    # TODO: forward to CRX Team API with cloud context
-    # The context includes which server/instance the user is looking at,
-    # so Vito can take actions on the right target
-    return VitoResponse(
-        reply="Vito bridge not yet connected. Configure CRX_TEAM_API_URL.",
-        actions_taken=[],
-        suggestions=["Configure CRX Team API connection"],
-    )
+    # Build enriched context for Vito
+    cloud_context = {
+        "source": "crx-cloud-panel",
+        "user_email": user.email,
+        "user_name": user.full_name,
+        **msg.context,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{settings.crx_team_api_url}/api/v1/vice/chat",
+                json={"message": msg.message, "context": cloud_context},
+                headers={"Authorization": f"Bearer {settings.crx_team_api_key}"},
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            return VitoResponse(
+                reply=data.get("reply", data.get("response", "")),
+                actions_taken=data.get("actions_taken", []),
+                suggestions=data.get("suggestions", []),
+            )
+    except httpx.ConnectError:
+        logger.warning("CRX Team API unreachable")
+        return VitoResponse(
+            reply="Vito non e' raggiungibile al momento. Verifica che CRX Team sia attivo.",
+            suggestions=["Controlla che CRX Team sia in esecuzione", "Verifica CRX_TEAM_API_URL"],
+        )
+    except httpx.HTTPStatusError as e:
+        logger.error(f"CRX Team API error: {e.response.status_code}")
+        return VitoResponse(
+            reply=f"Errore dalla piattaforma AI (HTTP {e.response.status_code}). Riprova.",
+            suggestions=["Riprova tra qualche secondo"],
+        )

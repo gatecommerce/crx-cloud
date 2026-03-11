@@ -5,16 +5,17 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import servers, instances, backups, plugins, health, vito
+from api.routes import servers, instances, backups, plugins, health, vito, auth
 from core.config import settings
+from core.database import init_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown events."""
-    # TODO: init DB, load plugins, start metrics collector
+    if settings.app_env == "dev":
+        await init_db()
     yield
-    # TODO: cleanup
 
 
 app = FastAPI(
@@ -33,6 +34,7 @@ app.add_middleware(
 )
 
 # Routes
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(health.router, tags=["health"])
 app.include_router(servers.router, prefix="/api/v1/servers", tags=["servers"])
 app.include_router(instances.router, prefix="/api/v1/instances", tags=["instances"])
