@@ -263,14 +263,33 @@ export default function InstanceDetailPage() {
   }
 
   const handleSaveSettings = async (key: string, value: boolean) => {
+    // Enterprise toggle: confirm + poll for progress
+    if (key === "enterprise" && value) {
+      if (!confirm("Enable Enterprise Edition? This will upload addons, restart the instance, and install enterprise modules. The instance will be temporarily unavailable.")) return;
+    }
+
     setSettingsSaving(true);
     try {
       await instancesApi.updateSettings(instanceId, { [key]: value });
+      // For enterprise, poll until status returns to "running"
+      if (key === "enterprise" && value) {
+        const poll = setInterval(async () => {
+          try {
+            const data = await instancesApi.get(instanceId);
+            setInstance(data);
+            if (data.status !== "upgrading") {
+              clearInterval(poll);
+              setSettingsSaving(false);
+            }
+          } catch {}
+        }, 3000);
+        return; // Don't setSettingsSaving(false) yet
+      }
       await loadInstance();
     } catch (e: any) {
       alert(e.message || "Failed to save settings");
     } finally {
-      setSettingsSaving(false);
+      if (key !== "enterprise" || !value) setSettingsSaving(false);
     }
   };
 
@@ -1097,18 +1116,47 @@ export default function InstanceDetailPage() {
                     </div>
                   </div>
 
+                  {/* Enterprise Upgrade Progress */}
+                  {instance?.status === "upgrading" && instance?.config?.enterprise_progress && (
+                    <div className="bg-blue-900/30 border border-blue-500/30 rounded-xl p-5">
+                      <div className="flex items-center gap-3">
+                        <Loader2 className="w-5 h-5 text-blue-400 animate-spin shrink-0" />
+                        <div>
+                          <h4 className="text-sm font-semibold text-blue-300">Enterprise Activation in Progress</h4>
+                          <p className="text-xs text-blue-400 mt-1">{instance.config.enterprise_progress}</p>
+                          <p className="text-xs text-gray-500 mt-1">Please do not close this page or perform other operations on this instance.</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Enterprise Error */}
+                  {instance?.config?.enterprise_error && (
+                    <div className="bg-red-900/20 border border-red-500/30 rounded-xl p-4">
+                      <div className="flex items-center gap-2 text-sm text-red-400">
+                        <XCircle className="w-4 h-4 shrink-0" />
+                        <span>Enterprise activation failed: {instance.config.enterprise_error}</span>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Instance Settings Card */}
                   <div className="bg-[var(--card)] border border-white/10 rounded-xl p-6">
                     <h3 className="text-lg font-semibold text-white mb-4">Instance Settings</h3>
                     <div className="space-y-4">
-                      <SettingToggle label="Auto SSL" description="Automatically provision and renew Let's Encrypt SSL certificates" checked={instance?.config?.auto_ssl !== false} onChange={(v) => handleSaveSettings("auto_ssl", v)} />
-                      <SettingToggle label="Auto Update Odoo" description="Automatically apply minor version updates when available" checked={instance?.config?.auto_update === true} onChange={(v) => handleSaveSettings("auto_update", v)} />
+                      <SettingToggle label="Auto SSL" description="Automatically provision and renew Let's Encrypt SSL certificates" checked={instance?.config?.auto_ssl !== false} onChange={(v) => handleSaveSettings("auto_ssl", v)} disabled={instance?.status === "upgrading"} />
+                      <SettingToggle label="Auto Update Odoo" description="Automatically apply minor version updates when available" checked={instance?.config?.auto_update === true} onChange={(v) => handleSaveSettings("auto_update", v)} disabled={instance?.status === "upgrading"} />
                       <SettingToggle
                         label="Enterprise Edition"
-                        description={enterprisePackages.find((p: any) => p.version === instance?.version) ? "Enable Odoo Enterprise features for this instance" : `Upload Enterprise package for Odoo ${instance?.version} in Settings to enable`}
+                        description={
+                          instance?.status === "upgrading" ? "Activation in progress..." :
+                          instance?.config?.enterprise === true ? "Odoo Enterprise is active" :
+                          enterprisePackages.find((p: any) => p.version === instance?.version) ? "Enable Odoo Enterprise features for this instance" :
+                          `Upload Enterprise package for Odoo ${instance?.version} in Settings to enable`
+                        }
                         checked={instance?.config?.enterprise === true}
                         onChange={(v) => handleSaveSettings("enterprise", v)}
-                        disabled={!enterprisePackages.find((p: any) => p.version === instance?.version)}
+                        disabled={instance?.status === "upgrading" || !enterprisePackages.find((p: any) => p.version === instance?.version)}
                       />
                     </div>
                   </div>

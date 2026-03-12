@@ -705,9 +705,17 @@ function EnterpriseSection() {
   const [packages, setPackages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [uploadVersion, setUploadVersion] = useState("18.0");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [detectedVersion, setDetectedVersion] = useState("");
   const [error, setError] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
+  const [showUploadModal, setShowUploadModal] = useState(false);
+
+  function detectVersionFromFilename(name: string): string {
+    const m = name.match(/(\d+\.\d+)/);
+    if (m && ["15.0","16.0","17.0","18.0","19.0","20.0"].includes(m[1])) return m[1];
+    return "";
+  }
 
   const loadPackages = useCallback(async () => {
     try {
@@ -727,9 +735,12 @@ function EnterpriseSection() {
     if (!uploadFile) return;
     setUploading(true);
     setError("");
+    setSuccessMsg("");
     try {
-      await settingsApi.uploadEnterprise(uploadVersion, uploadFile);
+      const result = await settingsApi.uploadEnterprise(uploadFile);
       setUploadFile(null);
+      setShowUploadModal(false);
+      setSuccessMsg(`Odoo ${result.version} Enterprise package uploaded successfully (${result.size_mb} MB)`);
       loadPackages();
     } catch (err: any) {
       setError(err.message);
@@ -802,7 +813,7 @@ function EnterpriseSection() {
                         {formatDate(pkg.revision_date || pkg.uploaded_at)}
                       </td>
                       <td className="px-4 py-3 text-sm text-[var(--muted)]">
-                        {formatSize(pkg.size)}
+                        {pkg.size_mb ? `${pkg.size_mb} MB` : "-"}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <button
@@ -826,57 +837,95 @@ function EnterpriseSection() {
             </p>
           )}
 
-          <form
-            onSubmit={handleUpload}
-            className="bg-[var(--background)] border border-[var(--border)] rounded-lg p-4 space-y-3"
+          {successMsg && (
+            <div className="text-sm text-[var(--success)] bg-[var(--success)]/10 rounded-lg px-3 py-2 mb-4 flex items-center gap-2">
+              <CheckCircle size={14} /> {successMsg}
+            </div>
+          )}
+
+          <button
+            onClick={() => { setShowUploadModal(true); setError(""); setSuccessMsg(""); setUploadFile(null); setDetectedVersion(""); }}
+            className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
           >
-            <h4 className="text-sm font-semibold mb-2">Upload Enterprise Package</h4>
+            <Upload size={16} /> Upload Enterprise Sources
+          </button>
 
-            {error && (
-              <div className="text-sm text-[var(--danger)] bg-[var(--danger)]/10 rounded-lg px-3 py-2">
-                {error}
-              </div>
-            )}
+          {/* Upload Modal */}
+          {showUploadModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => !uploading && setShowUploadModal(false)}>
+              <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-lg mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="text-lg font-semibold">Upload Odoo Enterprise Sources</h3>
+                  <button onClick={() => !uploading && setShowUploadModal(false)} className="text-[var(--muted)] hover:text-[var(--foreground)] text-xl leading-none">&times;</button>
+                </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-[var(--muted)] mb-1">Odoo Version</label>
-                <select
-                  value={uploadVersion}
-                  onChange={(e) => setUploadVersion(e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="17.0">17.0</option>
-                  <option value="18.0">18.0</option>
-                  <option value="19.0">19.0</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-[var(--muted)] mb-1">Package file (.tar.gz / .zip)</label>
-                <input
-                  type="file"
-                  accept=".tar.gz,.zip,.tgz"
-                  onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                  className={`${inputClass} file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-[var(--accent)]/10 file:text-[var(--accent)]`}
-                  required
-                />
-              </div>
-            </div>
+                <ol className="text-sm text-[var(--muted)] space-y-2 mb-5 list-decimal list-inside">
+                  <li>Go to <span className="text-[var(--accent)] font-medium">odoo.com/page/download</span></li>
+                  <li>Click the <strong className="text-[var(--foreground)]">Download</strong> button next to <strong className="text-[var(--foreground)]">Sources</strong> for the matching Odoo <strong className="text-[var(--foreground)]">Enterprise</strong> version</li>
+                  <li>If requested, enter your Odoo Enterprise license key</li>
+                  <li>Do not unzip the file (only .tar.gz extension is accepted)</li>
+                  <li>Please use the form below to upload the file:</li>
+                </ol>
 
-            <div className="flex gap-3 pt-1">
-              <button
-                type="submit"
-                disabled={uploading || !uploadFile}
-                className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-50 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
-              >
-                {uploading ? (
-                  <><Loader2 size={14} className="animate-spin" /> Uploading...</>
-                ) : (
-                  <><Upload size={14} /> Upload</>
+                {error && (
+                  <div className="text-sm text-[var(--danger)] bg-[var(--danger)]/10 rounded-lg px-3 py-2 mb-4">
+                    {error}
+                  </div>
                 )}
-              </button>
+
+                <form onSubmit={handleUpload} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5">File</label>
+                    <input
+                      type="file"
+                      accept=".tar.gz,.zip,.tgz"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] || null;
+                        setUploadFile(f);
+                        setDetectedVersion(f ? detectVersionFromFilename(f.name) : "");
+                        setError("");
+                      }}
+                      className={`${inputClass} file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-[var(--accent)]/10 file:text-[var(--accent)]`}
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5">Version</label>
+                    <input
+                      type="text"
+                      value={detectedVersion}
+                      readOnly
+                      placeholder="Auto-detected from file"
+                      className={`${inputClass} bg-[var(--card)] text-[var(--muted)]`}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-end gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowUploadModal(false)}
+                      disabled={uploading}
+                      className="px-4 py-2 text-sm text-[var(--muted)] hover:text-[var(--foreground)]"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={uploading || !uploadFile}
+                      className="px-5 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-50 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                    >
+                      {uploading ? (
+                        <><Loader2 size={14} className="animate-spin" /> Uploading...</>
+                      ) : (
+                        <><Upload size={14} /> Upload</>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
-          </form>
+          )}
         </>
       )}
     </div>

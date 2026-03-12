@@ -139,9 +139,8 @@ export const settingsApi = {
   listEnterprise: () => apiFetch<any[]>("/api/v1/settings/enterprise"),
   deleteEnterprise: (version: string) =>
     apiFetch<any>(`/api/v1/settings/enterprise/${version}`, { method: "DELETE" }),
-  uploadEnterprise: async (version: string, file: File) => {
+  uploadEnterprise: async (file: File) => {
     const form = new FormData();
-    form.append("version", version);
     form.append("file", file);
     const res = await fetch(`/api/v1/settings/enterprise/upload`, {
       method: "POST",

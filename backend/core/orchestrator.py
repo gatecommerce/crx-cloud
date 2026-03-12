@@ -30,6 +30,17 @@ def get_plugin(cms_type: str) -> Optional[CMSPlugin]:
     return _plugins.get(cms_type)
 
 
+def _server_info_from_db(server: Server):
+    """Build a ServerInfo for plugin drivers from DB Server model."""
+    from core.server_manager import ServerInfo, ServerStatus
+    return ServerInfo(
+        id=server.id, name=server.name, server_type="vm",
+        provider=server.provider or "", status=ServerStatus.ONLINE,
+        endpoint=server.endpoint,
+        metadata={"ssh_user": server.ssh_user or "root", "ssh_key_path": server.ssh_key_path or ""},
+    )
+
+
 def _db_to_cms_instance(inst: Instance, server: Server) -> CMSInstance:
     """Convert DB Instance + Server to CMSInstance dataclass for plugin drivers."""
     config = dict(inst.config or {})
@@ -283,10 +294,66 @@ async def update_instance_settings(inst: Instance, server: Server, db: AsyncSess
 
     try:
         # Enterprise edition toggle
-        if "enterprise" in settings:
+        if "enterprise" in settings and settings["enterprise"]:
+            from pathlib import Path
+
+            version = inst.version or "19.0"
+            enterprise_dir = Path("data/enterprise") / version
+            package_file = None
+            for f in enterprise_dir.iterdir() if enterprise_dir.exists() else []:
+                if f.suffix in (".gz", ".tgz", ".zip") or f.name.endswith(".tar.gz"):
+                    package_file = f
+                    break
+
+            if not package_file:
+                logger.error(f"No enterprise package found for v{version}")
+                inst.config = {**(inst.config or {}), "enterprise_error": f"No package for v{version}"}
+                await db.commit()
+                return
+
+            # Lock instance — prevent other operations
+            inst.status = "upgrading"
+            inst.config = {**(inst.config or {}), "enterprise_progress": "Uploading enterprise addons to server..."}
+            await db.commit()
+
+            try:
+                server_info = _server_info_from_db(server)
+                cms = _db_to_cms_instance(inst, server)
+
+                # Step 1: Upload + extract enterprise addons on server
+                inst.config = {**(inst.config or {}), "enterprise_progress": "Extracting enterprise addons on server..."}
+                await db.commit()
+
+                ok = await plugin.sync_enterprise_addons(server_info, version, str(package_file))
+                if not ok:
+                    raise RuntimeError("Failed to sync enterprise addons to server")
+
+                # Step 2: Enable enterprise (update compose, restart, install web_enterprise)
+                inst.config = {**(inst.config or {}), "enterprise_progress": "Activating enterprise modules..."}
+                await db.commit()
+
+                ok = await plugin.enable_enterprise(cms)
+                if not ok:
+                    raise RuntimeError("Failed to enable enterprise on instance")
+
+                # Success
+                inst.status = "running"
+                inst.config = {**(inst.config or {}), "enterprise": True, "enterprise_progress": None, "enterprise_error": None}
+                await db.commit()
+                logger.info(f"Enterprise enabled for {inst.name}")
+
+            except Exception as e:
+                logger.error(f"Enterprise activation failed for {inst.name}: {e}")
+                inst.status = "running"
+                inst.config = {**(inst.config or {}), "enterprise": False, "enterprise_error": str(e), "enterprise_progress": None}
+                await db.commit()
+                return
+
+        elif "enterprise" in settings and not settings["enterprise"]:
+            # Disable enterprise — revert to community compose
             cms = _db_to_cms_instance(inst, server)
-            await plugin.configure(cms, {"enterprise": settings["enterprise"]})
-            logger.info(f"Enterprise {'enabled' if settings['enterprise'] else 'disabled'} for {inst.name}")
+            ok = await plugin.update_compose(cms, {"enterprise": False})
+            logger.info(f"Enterprise disabled for {inst.name}")
 
         # SSL toggle
         if "auto_ssl" in settings:

@@ -3,6 +3,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
   skipTrailingSlashRedirect: true,
+  experimental: {
+    middlewareClientMaxBodySize: "500mb",
+  },
   async rewrites() {
     // Server-side rewrite: use internal Docker network URL when available
     const backendUrl = process.env.API_URL_INTERNAL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";

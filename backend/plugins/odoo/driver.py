@@ -79,10 +79,15 @@ class OdooPlugin(CMSPlugin):
             "--proxy-mode",
         ]
 
+        # Enterprise addons path must come BEFORE community addons (Odoo requirement)
         if enterprise:
-            cmd_parts.append("--addons-path=/mnt/extra-addons,/mnt/enterprise-addons")
+            cmd_parts.append("--addons-path=/mnt/enterprise-addons,/mnt/extra-addons")
 
         # Odoo config file (admin_passwd can only be set via conf in Odoo 17+)
+        addons_path_conf = ""
+        if enterprise:
+            addons_path_conf = "addons_path = /mnt/enterprise-addons,/mnt/extra-addons\n"
+
         odoo_conf = (
             f"[options]\n"
             f"admin_passwd = {admin_password}\n"
@@ -91,6 +96,7 @@ class OdooPlugin(CMSPlugin):
             f"db_user = {db_user}\n"
             f"db_password = {db_pass}\n"
             f"dbfilter = ^{db_name}$\n"
+            f"{addons_path_conf}"
         )
 
         command_str = " ".join(cmd_parts)
@@ -117,7 +123,7 @@ class OdooPlugin(CMSPlugin):
         ]
 
         if enterprise:
-            lines.append(f"      - /opt/crx-cloud/enterprise/{version}/enterprise:/mnt/enterprise-addons:ro")
+            lines.append(f"      - /opt/crx-cloud/enterprise/{version}/addons:/mnt/enterprise-addons:ro")
 
         if not use_external_db:
             lines += [
@@ -567,35 +573,202 @@ class OdooPlugin(CMSPlugin):
             logger.error(f"Failed to update compose for {instance.id}: {e}")
             return False
 
-    async def sync_enterprise_addons(self, server: ServerInfo, version: str, local_path: str) -> bool:
-        """Sync enterprise addons to remote server.
+    async def sync_enterprise_addons(self, server: ServerInfo, version: str, package_path: str) -> bool:
+        """Upload and extract enterprise addons on the remote server.
 
-        Ensures the enterprise addons directory structure exists on the remote.
-        In production, enterprise packages are uploaded via SCP; this method
-        creates the target directory and verifies readiness.
+        Steps:
+        1. SCP the tar.gz to server
+        2. Extract it
+        3. Find the addons directory (odoo-XX.X+e.../odoo/addons/)
+        4. Symlink/copy to /opt/crx-cloud/enterprise/{version}/addons/
         """
-        target_dir = f"/opt/crx-cloud/enterprise/{version}/enterprise"
+        base_dir = f"/opt/crx-cloud/enterprise/{version}"
+        addons_dir = f"{base_dir}/addons"
         try:
-            # Create target directory if it doesn't exist
-            result = await self.vm_driver._ssh_exec(
-                server,
-                f"mkdir -p {target_dir} && echo OK"
+            # Create base directory
+            await self.vm_driver._ssh_exec(server, f"mkdir -p {base_dir}")
+
+            # SCP the package to the server
+            ssh_user = server.metadata.get("ssh_user", "root")
+            ssh_key = server.metadata.get("ssh_key_path", "")
+            key_opt = f"-i {ssh_key}" if ssh_key else ""
+
+            import subprocess
+            scp_cmd = f"scp {key_opt} -o StrictHostKeyChecking=no {package_path} {ssh_user}@{server.endpoint}:{base_dir}/"
+            logger.info(f"SCP enterprise package to {server.endpoint}:{base_dir}/")
+            proc = await asyncio.to_thread(
+                subprocess.run, scp_cmd, shell=True, capture_output=True, text=True, timeout=600
             )
-            if "OK" not in result:
-                logger.error(f"Failed to create enterprise directory: {result}")
+            if proc.returncode != 0:
+                logger.error(f"SCP failed: {proc.stderr}")
                 return False
 
-            # Verify directory exists and is accessible
-            result = await self.vm_driver._ssh_exec(
-                server,
-                f"test -d {target_dir} && echo EXISTS || echo MISSING"
-            )
-            if "EXISTS" not in result:
-                logger.error(f"Enterprise directory not found after creation: {target_dir}")
+            # Get filename on server
+            import os
+            remote_file = f"{base_dir}/{os.path.basename(package_path)}"
+
+            # Extract and find addons directory
+            # Odoo enterprise tar.gz structure: odoo-19.0+e.YYYYMMDD/odoo/addons/
+            extract_script = f"""
+cd {base_dir} && \\
+rm -rf addons extract_tmp && \\
+mkdir -p extract_tmp && \\
+tar xzf {remote_file} -C extract_tmp && \\
+ODOO_DIR=$(find extract_tmp -maxdepth 1 -type d -name 'odoo*' | head -1) && \\
+if [ -d "$ODOO_DIR/odoo/addons" ]; then
+    mv "$ODOO_DIR/odoo/addons" addons
+elif [ -d "$ODOO_DIR/addons" ]; then
+    mv "$ODOO_DIR/addons" addons
+elif [ -d "$ODOO_DIR" ]; then
+    mv "$ODOO_DIR" addons
+fi && \\
+rm -rf extract_tmp && \\
+ADDON_COUNT=$(ls -1d addons/*/  2>/dev/null | wc -l) && \\
+echo "ENTERPRISE_ADDONS_OK count=$ADDON_COUNT"
+"""
+            result = await self.vm_driver._ssh_exec(server, extract_script, timeout=300)
+            if "ENTERPRISE_ADDONS_OK" not in result:
+                logger.error(f"Enterprise extraction failed: {result}")
                 return False
 
-            logger.info(f"Enterprise addons directory ready: {target_dir}")
+            logger.info(f"Enterprise addons extracted on {server.endpoint}: {result.strip()}")
             return True
         except Exception as e:
             logger.error(f"Failed to sync enterprise addons for v{version}: {e}")
+            return False
+
+    async def enable_enterprise(self, instance: CMSInstance) -> bool:
+        """Enable enterprise on a running instance.
+
+        Steps:
+        1. Update docker-compose + odoo.conf with enterprise addons path
+        2. Restart container
+        3. Trigger Odoo to update apps list
+        4. Install web_enterprise module
+        """
+        try:
+            deploy_dir = instance.config.get("deploy_dir", "")
+            endpoint = instance.config.get("endpoint", "")
+            port = instance.config.get("port", 8069)
+            ssh_meta = instance.config.get("ssh_metadata", {})
+            server = self._server_info(instance.server_id, endpoint, ssh_meta)
+            db_name = instance.config.get("db_name", instance.name)
+            admin_password = instance.config.get("admin_password", "admin")
+
+            # 1. Regenerate compose + conf with enterprise=True
+            merged_config = {**instance.config, "enterprise": True}
+            compose, odoo_conf = self._compose_content(instance.id, merged_config)
+
+            await self.vm_driver._ssh_exec(
+                server,
+                f"cat > {deploy_dir}/docker-compose.yml << 'COMPOSEOF'\n{compose}COMPOSEOF"
+            )
+            await self.vm_driver._ssh_exec(
+                server,
+                f"cat > {deploy_dir}/odoo.conf << 'CONFEOF'\n{odoo_conf}CONFEOF"
+            )
+
+            # 2. Restart with new config
+            await self.vm_driver._ssh_exec(
+                server,
+                f"cd {deploy_dir} && docker compose up -d"
+            )
+
+            # 3. Wait for Odoo to be ready
+            for i in range(30):
+                await asyncio.sleep(5)
+                check = await self.vm_driver._ssh_exec(
+                    server,
+                    f"curl -s -o /dev/null -w '%{{http_code}}' http://localhost:{port}/web/login"
+                )
+                if "200" in check:
+                    break
+            else:
+                logger.warning("Odoo not ready after 150s, proceeding anyway")
+
+            # 4. Update module list via JSONRPC
+            import json as _json
+            update_payload = _json.dumps({
+                "jsonrpc": "2.0", "id": 1, "method": "call",
+                "params": {
+                    "service": "object", "method": "execute_kw",
+                    "args": [db_name, 2, admin_password, "ir.module.module", "update_list", []]
+                }
+            })
+            await self.vm_driver._ssh_exec(
+                server,
+                f"curl -s -X POST http://localhost:{port}/jsonrpc "
+                f"-H 'Content-Type: application/json' "
+                f"-d '{update_payload}' --max-time 120",
+                timeout=120
+            )
+            logger.info(f"Updated module list for {instance.name}")
+
+            # 5. Install web_enterprise module
+            # First find the module ID
+            find_payload = _json.dumps({
+                "jsonrpc": "2.0", "id": 2, "method": "call",
+                "params": {
+                    "service": "object", "method": "execute_kw",
+                    "args": [db_name, 2, admin_password, "ir.module.module", "search_read",
+                             [[["name", "=", "web_enterprise"]]],
+                             {"fields": ["id", "state"], "limit": 1}]
+                }
+            })
+            result = await self.vm_driver._ssh_exec(
+                server,
+                f"curl -s -X POST http://localhost:{port}/jsonrpc "
+                f"-H 'Content-Type: application/json' "
+                f"-d '{find_payload}' --max-time 30",
+                timeout=30
+            )
+            logger.info(f"web_enterprise lookup: {result[:200]}")
+
+            # Install the module via button_immediate_install
+            install_payload = _json.dumps({
+                "jsonrpc": "2.0", "id": 3, "method": "call",
+                "params": {
+                    "service": "object", "method": "execute_kw",
+                    "args": [db_name, 2, admin_password, "ir.module.module", "search",
+                             [[["name", "=", "web_enterprise"]]]]
+                }
+            })
+            result = await self.vm_driver._ssh_exec(
+                server,
+                f"curl -s -X POST http://localhost:{port}/jsonrpc "
+                f"-H 'Content-Type: application/json' "
+                f"-d '{install_payload}' --max-time 30",
+                timeout=30
+            )
+
+            # Parse module ID and install
+            try:
+                import json
+                data = json.loads(result)
+                module_ids = data.get("result", [])
+                if module_ids:
+                    install_btn_payload = _json.dumps({
+                        "jsonrpc": "2.0", "id": 4, "method": "call",
+                        "params": {
+                            "service": "object", "method": "execute_kw",
+                            "args": [db_name, 2, admin_password, "ir.module.module",
+                                     "button_immediate_install", [module_ids]]
+                        }
+                    })
+                    await self.vm_driver._ssh_exec(
+                        server,
+                        f"curl -s -X POST http://localhost:{port}/jsonrpc "
+                        f"-H 'Content-Type: application/json' "
+                        f"-d '{install_btn_payload}' --max-time 300",
+                        timeout=300
+                    )
+                    logger.info(f"web_enterprise installed on {instance.name}")
+                else:
+                    logger.warning(f"web_enterprise module not found on {instance.name}")
+            except Exception as e:
+                logger.warning(f"Failed to parse/install web_enterprise: {e}")
+
+            return True
+        except Exception as e:
+            logger.error(f"Failed to enable enterprise on {instance.name}: {e}")
             return False

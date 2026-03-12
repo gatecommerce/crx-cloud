@@ -331,50 +331,130 @@ async def list_enterprise_packages(
     return packages
 
 
+def _detect_odoo_version(archive_path: Path, filename: str) -> str | None:
+    """Auto-detect Odoo version from enterprise package.
+
+    Detection priority:
+    1. Filename (e.g. "odoo_19.0+e.20251015.tar.gz" -> 19.0)
+    2. Top-level dir (e.g. "odoo-19.0+e.20251015/" -> 19.0)
+    3. __manifest__.py Odoo-style version (e.g. "19.0.1.4.0" -> 19.0)
+    """
+    import re
+
+    VALID_ODOO = {"15.0", "16.0", "17.0", "18.0", "19.0", "20.0"}
+
+    # 1. Filename — most reliable for official Odoo packages
+    for fm in re.finditer(r"(\d+\.\d+)", filename):
+        if fm.group(1) in VALID_ODOO:
+            logger.info(f"Version {fm.group(1)} detected from filename: {filename}")
+            return fm.group(1)
+
+    # 2. Inspect archive top-level dirs and manifests
+    top_dirs: list[str] = []
+    try:
+        if filename.endswith(".zip"):
+            with zipfile.ZipFile(archive_path, "r") as zf:
+                all_names = zf.namelist()
+                top_dirs = list({n.split("/")[0] for n in all_names if "/" in n})
+        elif filename.endswith(".tar.gz") or filename.endswith(".tgz"):
+            with tarfile.open(archive_path, "r:gz") as tf:
+                top_dirs = list({m.name.split("/")[0] for m in tf.getmembers() if "/" in m.name})
+    except Exception as e:
+        logger.warning(f"Archive inspection failed: {e}")
+
+    logger.debug(f"Archive top dirs: {top_dirs[:5]}")
+
+    # Check top-level dir names (e.g. "odoo-19.0+e.20251015")
+    for d in top_dirs:
+        for dm in re.finditer(r"(\d+\.\d+)", d):
+            if dm.group(1) in VALID_ODOO:
+                logger.info(f"Version {dm.group(1)} detected from dir: {d}")
+                return dm.group(1)
+
+    # 3. Last resort: __manifest__.py (Odoo versions are like "19.0.1.4.0")
+    try:
+        if filename.endswith(".zip"):
+            with zipfile.ZipFile(archive_path, "r") as zf:
+                for name in zf.namelist():
+                    if name.endswith("__manifest__.py"):
+                        content = zf.read(name).decode("utf-8", errors="ignore")
+                        vm = re.search(r"['\"]version['\"]\s*:\s*['\"](\d+\.\d+)\.\d+", content)
+                        if vm and vm.group(1) in VALID_ODOO:
+                            logger.info(f"Version {vm.group(1)} from manifest {name}")
+                            return vm.group(1)
+                        break
+        elif filename.endswith(".tar.gz") or filename.endswith(".tgz"):
+            with tarfile.open(archive_path, "r:gz") as tf:
+                for member in tf.getmembers():
+                    if member.name.endswith("__manifest__.py"):
+                        f = tf.extractfile(member)
+                        if f:
+                            content = f.read().decode("utf-8", errors="ignore")
+                            vm = re.search(r"['\"]version['\"]\s*:\s*['\"](\d+\.\d+)\.\d+", content)
+                            if vm and vm.group(1) in VALID_ODOO:
+                                logger.info(f"Version {vm.group(1)} from manifest {member.name}")
+                                return vm.group(1)
+                        break
+    except Exception as e:
+        logger.warning(f"Manifest inspection failed: {e}")
+
+    logger.warning(f"Could not detect Odoo version from {filename}")
+    return None
+
+
 @router.post("/enterprise/upload")
 async def upload_enterprise_package(
-    version: str = Form(...),
     file: UploadFile = File(...),
     user: dict = Depends(get_current_user),
 ):
-    """Upload an enterprise package for a specific Odoo version."""
-    valid_versions = ["17.0", "18.0", "19.0"]
-    if version not in valid_versions:
+    """Upload an enterprise package — version is auto-detected from filename."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    fname = file.filename
+    logger.info(f"Enterprise upload started: {fname}")
+
+    # Auto-detect version from filename (e.g. odoo_19.0+e.20251015.tar.gz)
+    import re
+    VALID_ODOO = {"15.0", "16.0", "17.0", "18.0", "19.0", "20.0"}
+    version = None
+    for m in re.finditer(r"(\d+\.\d+)", fname):
+        if m.group(1) in VALID_ODOO:
+            version = m.group(1)
+            break
+
+    if not version:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid version '{version}'. Must be one of: {', '.join(valid_versions)}",
+            detail="Could not detect Odoo version from filename. Expected pattern like 'odoo_19.0+e.tar.gz'.",
         )
 
+    logger.info(f"Enterprise version detected: {version} from {fname}")
+
     version_dir = ENTERPRISE_DIR / version
+    # Clean old package if exists
+    if version_dir.exists():
+        shutil.rmtree(version_dir)
     version_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save uploaded file
-    file_path = version_dir / file.filename
-    contents = await file.read()
-    file_path.write_bytes(contents)
-    size_mb = round(len(contents) / (1024 * 1024), 2)
+    # Stream file to disk (avoids loading 300+ MB into memory)
+    file_path = version_dir / fname
+    size_bytes = 0
+    with open(file_path, "wb") as out:
+        while chunk := await file.read(1024 * 1024):  # 1MB chunks
+            out.write(chunk)
+            size_bytes += len(chunk)
 
-    logger.info(f"Enterprise package uploaded: {file.filename} ({size_mb} MB) for version {version}")
-
-    # Extract if zip or tar.gz
-    try:
-        if file.filename.endswith(".zip"):
-            with zipfile.ZipFile(file_path, "r") as zf:
-                zf.extractall(version_dir)
-            logger.info(f"Extracted zip: {file.filename}")
-        elif file.filename.endswith(".tar.gz") or file.filename.endswith(".tgz"):
-            with tarfile.open(file_path, "r:gz") as tf:
-                tf.extractall(version_dir)
-            logger.info(f"Extracted tar.gz: {file.filename}")
-    except Exception as e:
-        logger.warning(f"Extraction failed for {file.filename}: {e}")
+    size_mb = round(size_bytes / (1024 * 1024), 2)
+    logger.info(f"Enterprise package saved: {file_path} ({size_mb} MB)")
 
     # Write meta.json
     uploaded_at = datetime.now(timezone.utc).isoformat()
     meta = {
         "uploaded_at": uploaded_at,
-        "filename": file.filename,
+        "filename": fname,
         "size_mb": size_mb,
+        "version": version,
     }
     (version_dir / "meta.json").write_text(json.dumps(meta, indent=2))
 
@@ -382,7 +462,7 @@ async def upload_enterprise_package(
         "version": version,
         "uploaded_at": uploaded_at,
         "size_mb": size_mb,
-        "filename": file.filename,
+        "filename": fname,
     }
 
 
