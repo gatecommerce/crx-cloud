@@ -22,7 +22,7 @@ class Instance(Base):
     )
     version: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(
-        SAEnum("running", "stopped", "deploying", "error", "updating", name="instance_status_enum"),
+        SAEnum("running", "stopped", "deploying", "error", "updating", "upgrading", name="instance_status_enum"),
         default="deploying",
     )
 
