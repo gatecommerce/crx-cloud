@@ -81,6 +81,12 @@ export const instancesApi = {
     apiFetch<any>(`/api/v1/instances/${id}/settings`, { method: "PATCH", body: JSON.stringify(data) }),
   updateDomain: (id: string, data: Record<string, any>) =>
     apiFetch<any>(`/api/v1/instances/${id}/domain`, { method: "PATCH", body: JSON.stringify(data) }),
+  // Addons
+  listAddons: (id: string) => apiFetch<any[]>(`/api/v1/instances/${id}/addons`),
+  updateEnterpriseAddons: (id: string) =>
+    apiFetch<any>(`/api/v1/instances/${id}/addons/enterprise/update`, { method: "POST" }),
+  removeEnterpriseAddons: (id: string) =>
+    apiFetch<any>(`/api/v1/instances/${id}/addons/enterprise`, { method: "DELETE" }),
 };
 
 // Backup API

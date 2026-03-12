@@ -452,3 +452,87 @@ async def update_domain(
     background_tasks.add_task(_bg_update_domain, inst.id, server.id, domain_data)
 
     return _to_response(inst)
+
+
+@router.get("/{instance_id}/addons")
+async def list_addons(
+    instance_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """List addons installed on the instance (enterprise, custom, etc.)."""
+    result = await db.execute(
+        select(Instance).where(Instance.id == instance_id, Instance.owner_id == user["telegram_id"])
+    )
+    inst = result.scalar_one_or_none()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    addons = []
+    config = inst.config or {}
+
+    # Enterprise addon
+    if config.get("enterprise"):
+        addons.append({
+            "type": "file",
+            "name": "Odoo Enterprise",
+            "branch": inst.version,
+            "status": "installed",
+            "can_update": True,
+            "can_delete": True,
+        })
+
+    return addons
+
+
+async def _bg_update_enterprise_addons(instance_id: str, server_id: str):
+    """Background task: re-sync enterprise addons from global package."""
+    async with async_session() as db:
+        result = await db.execute(select(Instance).where(Instance.id == instance_id))
+        inst = result.scalar_one_or_none()
+        if not inst:
+            return
+        srv_result = await db.execute(select(Server).where(Server.id == server_id))
+        server = srv_result.scalar_one_or_none()
+        if not server:
+            return
+        await update_instance_settings(inst, server, db, {"enterprise": True})
+
+
+@router.post("/{instance_id}/addons/enterprise/update")
+async def update_enterprise_addons(
+    instance_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Re-sync enterprise addons from global package (e.g. after re-upload)."""
+    inst, server = await _get_instance_and_server(instance_id, user["telegram_id"], db)
+    if not (inst.config or {}).get("enterprise"):
+        raise HTTPException(status_code=400, detail="Enterprise is not enabled on this instance")
+    if inst.status != "running":
+        raise HTTPException(status_code=400, detail="Instance must be running to update addons")
+
+    background_tasks.add_task(_bg_update_enterprise_addons, inst.id, server.id)
+    return {"detail": f"Enterprise addons update started for {inst.name}"}
+
+
+@router.delete("/{instance_id}/addons/enterprise")
+async def remove_enterprise_addons(
+    instance_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Disable enterprise and revert to community edition."""
+    inst, server = await _get_instance_and_server(instance_id, user["telegram_id"], db)
+    if not (inst.config or {}).get("enterprise"):
+        raise HTTPException(status_code=400, detail="Enterprise is not enabled on this instance")
+
+    # Set enterprise to false in config
+    inst.config = {**(inst.config or {}), "enterprise": False}
+    await db.commit()
+
+    # Trigger orchestrator to revert compose
+    background_tasks.add_task(_bg_update_settings, inst.id, server.id, {"enterprise": False})
+    return {"detail": f"Enterprise addon removal started for {inst.name}"}

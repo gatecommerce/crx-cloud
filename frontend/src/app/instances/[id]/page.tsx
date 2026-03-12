@@ -96,9 +96,9 @@ export default function InstanceDetailPage() {
 
   // Addons state
   const [addonInput, setAddonInput] = useState("");
-  const [installedAddons] = useState<{ name: string; status: string; installed_at: string }[]>([
-    // Placeholder data
-  ]);
+  const [addons, setAddons] = useState<any[]>([]);
+  const [addonsLoading, setAddonsLoading] = useState(false);
+  const [addonUpdating, setAddonUpdating] = useState(false);
 
   // Backups schedule state
   const [backupSchedule, setBackupSchedule] = useState({
@@ -174,11 +174,23 @@ export default function InstanceDetailPage() {
     }
   }, [instance, loadHealth]);
 
+  const loadAddons = useCallback(async () => {
+    setAddonsLoading(true);
+    try {
+      const data = await instancesApi.listAddons(instanceId);
+      setAddons(data);
+    } catch { setAddons([]); }
+    finally { setAddonsLoading(false); }
+  }, [instanceId]);
+
   useEffect(() => {
     if (activeTab === "logs") {
       loadLogs();
     }
-  }, [activeTab, loadLogs]);
+    if (activeTab === "addons") {
+      loadAddons();
+    }
+  }, [activeTab, loadLogs, loadAddons]);
 
   // Auto-refresh for deploying instances
   useEffect(() => {
@@ -890,9 +902,133 @@ export default function InstanceDetailPage() {
               {/* ========== ADDONS TAB ========== */}
               {activeTab === "addons" && (
                 <div>
-                  {/* Install Module */}
+                  {/* Addons Table — Cloudpepper style */}
                   <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 mb-4">
-                    <h3 className="text-sm font-semibold mb-4">Install Module</h3>
+                    <h3 className="text-sm font-semibold mb-4">Addons</h3>
+
+                    {addonsLoading ? (
+                      <div className="text-center py-8">
+                        <Loader2 size={24} className="mx-auto animate-spin text-[var(--muted)] mb-2" />
+                        <p className="text-sm text-[var(--muted)]">Loading addons...</p>
+                      </div>
+                    ) : addons.length === 0 ? (
+                      <div className="text-center py-8">
+                        <Puzzle size={32} className="mx-auto text-[var(--muted)] mb-3" />
+                        <p className="text-sm text-[var(--muted)]">No addons installed yet.</p>
+                        <p className="text-xs text-[var(--muted)] mt-1">
+                          Enable Enterprise Edition in Settings to add Odoo Enterprise addons.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-xs text-[var(--muted)] uppercase tracking-wider border-b border-[var(--border)]">
+                              <th className="pb-3 pr-4">Type</th>
+                              <th className="pb-3 pr-4">Name</th>
+                              <th className="pb-3 pr-4">Branch</th>
+                              <th className="pb-3 pr-4">Status</th>
+                              <th className="pb-3 text-right">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {addons.map((addon, idx) => (
+                              <tr key={idx} className="border-b border-white/5 last:border-0">
+                                <td className="py-3 pr-4">
+                                  <span className="text-xs px-2 py-1 rounded bg-[var(--accent)]/10 text-[var(--accent)] font-medium capitalize">
+                                    {addon.type}
+                                  </span>
+                                </td>
+                                <td className="py-3 pr-4 font-medium text-white">{addon.name}</td>
+                                <td className="py-3 pr-4">
+                                  <span className="text-xs px-2 py-1 rounded bg-white/5 text-[var(--muted)] font-mono">
+                                    {addon.branch}
+                                  </span>
+                                </td>
+                                <td className="py-3 pr-4">
+                                  <span className={`text-xs px-2 py-1 rounded-full capitalize ${
+                                    addon.status === "installed"
+                                      ? "bg-[var(--success)]/10 text-[var(--success)]"
+                                      : "bg-[var(--warning)]/10 text-[var(--warning)]"
+                                  }`}>
+                                    {addon.status}
+                                  </span>
+                                </td>
+                                <td className="py-3 text-right">
+                                  <div className="flex items-center justify-end gap-2">
+                                    {addon.can_update && (
+                                      <button
+                                        onClick={async () => {
+                                          if (!confirm("Update enterprise addons? This will re-sync from the global package and restart the instance.")) return;
+                                          setAddonUpdating(true);
+                                          try {
+                                            await instancesApi.updateEnterpriseAddons(instanceId);
+                                            // Poll for completion
+                                            const poll = setInterval(async () => {
+                                              try {
+                                                const data = await instancesApi.get(instanceId);
+                                                setInstance(data);
+                                                if (data.status !== "upgrading") {
+                                                  clearInterval(poll);
+                                                  setAddonUpdating(false);
+                                                  loadAddons();
+                                                }
+                                              } catch {}
+                                            }, 3000);
+                                          } catch (e: any) {
+                                            alert(e.message || "Failed to update addons");
+                                            setAddonUpdating(false);
+                                          }
+                                        }}
+                                        disabled={addonUpdating || instance?.status !== "running"}
+                                        className="px-3 py-1.5 text-xs rounded-lg border border-[var(--border)] hover:bg-white/5 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                                      >
+                                        {addonUpdating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                                        Update
+                                      </button>
+                                    )}
+                                    {addon.can_delete && (
+                                      <button
+                                        onClick={async () => {
+                                          if (!confirm("Remove Enterprise addons and revert to Community edition? This will restart the instance.")) return;
+                                          try {
+                                            await instancesApi.removeEnterpriseAddons(instanceId);
+                                            loadAddons();
+                                            loadInstance();
+                                          } catch (e: any) {
+                                            alert(e.message || "Failed to remove addon");
+                                          }
+                                        }}
+                                        disabled={instance?.status !== "running"}
+                                        className="px-3 py-1.5 text-xs rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+                                      >
+                                        Delete
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* Upgrading progress banner */}
+                    {instance?.status === "upgrading" && instance?.config?.enterprise_progress && (
+                      <div className="mt-4 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center gap-3">
+                        <Loader2 size={16} className="animate-spin text-blue-400" />
+                        <div>
+                          <p className="text-sm text-blue-300 font-medium">Addon update in progress</p>
+                          <p className="text-xs text-blue-400 mt-0.5">{instance.config.enterprise_progress}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Install Custom Module */}
+                  <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
+                    <h3 className="text-sm font-semibold mb-4">Install Custom Module</h3>
                     <div className="flex gap-2">
                       <input
                         type="text"
@@ -911,39 +1047,6 @@ export default function InstanceDetailPage() {
                     <p className="text-xs text-[var(--muted)] mt-2">
                       Enter the technical name of the Odoo module to install. The instance will restart automatically.
                     </p>
-                  </div>
-
-                  {/* Installed Modules */}
-                  <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
-                    <h3 className="text-sm font-semibold mb-4">Installed Modules</h3>
-                    {installedAddons.length === 0 ? (
-                      <div className="text-center py-8">
-                        <Puzzle size={32} className="mx-auto text-[var(--muted)] mb-3" />
-                        <p className="text-sm text-[var(--muted)]">Module management API coming soon.</p>
-                        <p className="text-xs text-[var(--muted)] mt-1">Installed modules will appear here once the API is available.</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {installedAddons.map((addon) => (
-                          <div key={addon.name} className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-[var(--card-hover)]">
-                            <div className="flex items-center gap-3">
-                              <Puzzle size={14} className="text-[var(--muted)]" />
-                              <span className="text-sm font-medium">{addon.name}</span>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <span className={`text-xs px-2 py-0.5 rounded-full capitalize ${
-                                addon.status === "installed"
-                                  ? "bg-[var(--success)]/10 text-[var(--success)]"
-                                  : "bg-[var(--warning)]/10 text-[var(--warning)]"
-                              }`}>
-                                {addon.status}
-                              </span>
-                              <span className="text-xs text-[var(--muted)]">{addon.installed_at}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 </div>
               )}
