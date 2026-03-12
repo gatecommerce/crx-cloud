@@ -477,8 +477,8 @@ function ConnectServerWizard({ onClose, onConnected }: { onClose: () => void; on
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
   const [createdServer, setCreatedServer] = useState<any>(null);
-  const [planFilter, setPlanFilter] = useState<string>("all"); // all, shared, dedicated
-  const [cmsFilter, setCmsFilter] = useState<string>("all"); // all, odoo-18, wordpress, etc.
+  const [cmsFilter, setCmsFilter] = useState<string>(""); // odoo-18, wordpress, etc.
+  const [workloadFilter, setWorkloadFilter] = useState<string>("startup"); // startup, medium, intensive
 
   // Load SSH key and check providers
   useEffect(() => {
@@ -638,8 +638,8 @@ function ConnectServerWizard({ onClose, onConnected }: { onClose: () => void; on
               plans={plans} regions={regions} loading={plansLoading}
               form={createForm} setForm={setCreateForm}
               sym={sym} provider={selectedProvider}
-              planFilter={planFilter} setPlanFilter={setPlanFilter}
               cmsFilter={cmsFilter} setCmsFilter={setCmsFilter}
+              workloadFilter={workloadFilter} setWorkloadFilter={setWorkloadFilter}
               onNext={() => setCreateStep("confirm")}
               onBack={() => { setCreateStep("provider"); setSelectedProvider(""); }}
               error={createError}
@@ -798,36 +798,63 @@ function ChooseProvider({ providers, selected, onSelect, onBack }: {
   );
 }
 
-// ─── Create: Plan Selection ──────────────────────────────────────────
+// ─── Create: Plan Selection (Smart Guided) ──────────────────────────
+
+const CMS_OPTIONS = [
+  { id: "odoo-18", label: "Odoo 18", icon: "O18" },
+  { id: "odoo-17", label: "Odoo 17", icon: "O17" },
+  { id: "odoo-16", label: "Odoo 16", icon: "O16" },
+  { id: "odoo-15", label: "Odoo 15", icon: "O15" },
+  { id: "odoo-14", label: "Odoo 14", icon: "O14" },
+  { id: "wordpress", label: "WordPress", icon: "WP" },
+  { id: "woocommerce", label: "WooCommerce", icon: "WC" },
+  { id: "prestashop", label: "PrestaShop", icon: "PS" },
+  { id: "magento", label: "Magento 2", icon: "MG" },
+];
+
+const WORKLOAD_OPTIONS = [
+  { id: "startup", label: "Startup", desc: "Small projects, few users, dev/test", icon: Zap },
+  { id: "medium", label: "Production", desc: "Moderate traffic, 50-200 users", icon: Activity },
+  { id: "intensive", label: "High Traffic", desc: "Large catalogs, heavy workload", icon: ServerIcon },
+];
 
 function CreatePlanStep({ plans, regions, loading, form, setForm, sym, provider,
-  planFilter, setPlanFilter, cmsFilter, setCmsFilter, onNext, onBack, error }: {
+  cmsFilter, setCmsFilter, workloadFilter, setWorkloadFilter, onNext, onBack, error }: {
   plans: Plan[]; regions: Region[]; loading: boolean;
   form: any; setForm: (f: any) => void; sym: string; provider: string;
-  planFilter: string; setPlanFilter: (f: string) => void;
   cmsFilter: string; setCmsFilter: (f: string) => void;
+  workloadFilter: string; setWorkloadFilter: (f: string) => void;
   onNext: () => void; onBack: () => void; error: string;
 }) {
-  // Filter plans
-  const filteredPlans = useMemo(() => {
-    let result = plans;
-    if (planFilter === "shared") result = result.filter((p) => p.cpu_type === "shared");
-    if (planFilter === "dedicated") result = result.filter((p) => p.cpu_type === "dedicated");
-    if (cmsFilter !== "all") {
-      result = result.filter((p) => {
-        const rec = (p.cms_recommendations || []).find((r) => r.cms === cmsFilter);
-        return rec && rec.level !== "insufficient";
-      });
-    }
-    return result;
-  }, [plans, planFilter, cmsFilter]);
+  // Filter and sort plans based on CMS + workload
+  const { perfectPlans, goodPlans } = useMemo(() => {
+    if (!cmsFilter) return { perfectPlans: plans, goodPlans: [] as Plan[] };
 
-  // Filter regions for this plan (some providers restrict plans to regions)
+    const perfect: Plan[] = [];
+    const good: Plan[] = [];
+
+    for (const plan of plans) {
+      const fit = (plan as any).workload_fit?.[cmsFilter]?.[workloadFilter];
+      if (!fit) continue;
+      if (fit.fit === "perfect") perfect.push(plan);
+      else if (fit.fit === "good") good.push(plan);
+    }
+
+    // Sort by price ascending
+    perfect.sort((a, b) => a.price_monthly - b.price_monthly);
+    good.sort((a, b) => a.price_monthly - b.price_monthly);
+
+    return { perfectPlans: perfect, goodPlans: good };
+  }, [plans, cmsFilter, workloadFilter]);
+
+  // Filter regions for selected plan
   const availableRegions = useMemo(() => {
     const selectedPlan = plans.find((p) => p.name === form.plan || p.id === form.plan);
     if (!selectedPlan?.regions || selectedPlan.regions.length === 0) return regions;
     return regions.filter((r) => selectedPlan.regions!.includes(r.id || r.name));
   }, [plans, regions, form.plan]);
+
+  const hasResults = perfectPlans.length > 0 || goodPlans.length > 0;
 
   if (loading) {
     return (
@@ -850,7 +877,7 @@ function CreatePlanStep({ plans, regions, loading, form, setForm, sym, provider,
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* Server Name */}
       <div>
         <label className="block text-sm font-medium mb-1.5">Server Name</label>
@@ -863,80 +890,146 @@ function CreatePlanStep({ plans, regions, loading, form, setForm, sym, provider,
         />
       </div>
 
-      {/* Region */}
+      {/* CMS Selection */}
       <div>
-        <label className="block text-sm font-medium mb-1.5">Region</label>
-        <div className="flex gap-2 flex-wrap">
-          {availableRegions.slice(0, 12).map((r) => (
+        <label className="block text-sm font-medium mb-2">What will you install?</label>
+        <div className="grid grid-cols-3 gap-2">
+          {CMS_OPTIONS.map((cms) => (
             <button
-              key={r.id || r.name}
+              key={cms.id}
               type="button"
-              onClick={() => setForm({ ...form, region: r.id || r.name })}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                form.region === (r.id || r.name)
-                  ? "bg-[var(--accent)] text-white"
-                  : "bg-[var(--background)] border border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent)]/50"
+              onClick={() => { setCmsFilter(cms.id); setForm({ ...form, plan: "" }); }}
+              className={`px-3 py-2.5 rounded-xl text-left transition-all ${
+                cmsFilter === cms.id
+                  ? "bg-[var(--accent)]/10 border-2 border-[var(--accent)]"
+                  : "bg-[var(--background)] border border-[var(--border)] hover:border-[var(--accent)]/30"
               }`}
             >
-              {r.city || r.name}{r.country ? ` (${r.country})` : ""}
+              <div className="flex items-center gap-2.5">
+                <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                  cmsFilter === cms.id ? "bg-[var(--accent)] text-white" : "bg-[var(--border)] text-[var(--muted)]"
+                }`}>
+                  {cms.icon}
+                </span>
+                <span className={`text-xs font-medium ${cmsFilter === cms.id ? "text-[var(--foreground)]" : "text-[var(--muted)]"}`}>
+                  {cms.label}
+                </span>
+              </div>
             </button>
           ))}
         </div>
       </div>
 
-      {/* Plan Filters */}
-      <div className="flex items-center gap-3">
-        <label className="text-sm font-medium">Plan</label>
-        <div className="flex gap-1.5 ml-auto">
-          {/* CPU filter */}
-          {["all", "shared", "dedicated"].map((f) => (
-            <button
-              key={f}
-              onClick={() => setPlanFilter(f)}
-              className={`px-2.5 py-1 rounded text-[10px] font-medium transition-all ${
-                planFilter === f
-                  ? "bg-[var(--accent)]/15 text-[var(--accent)] border border-[var(--accent)]/30"
-                  : "bg-[var(--background)] text-[var(--muted)] border border-transparent hover:border-[var(--border)]"
-              }`}
-            >
-              {f === "all" ? "All" : f === "shared" ? "Shared CPU" : "Dedicated CPU"}
-            </button>
-          ))}
-          {/* CMS filter */}
-          <select
-            value={cmsFilter}
-            onChange={(e) => setCmsFilter(e.target.value)}
-            className="px-2 py-1 rounded text-[10px] bg-[var(--background)] border border-[var(--border)] text-[var(--muted)] focus:outline-none focus:border-[var(--accent)]"
-          >
-            <option value="all">All CMS</option>
-            <option value="odoo-18">Odoo 18</option>
-            <option value="odoo-17">Odoo 17</option>
-            <option value="odoo-16">Odoo 16</option>
-            <option value="wordpress">WordPress</option>
-            <option value="woocommerce">WooCommerce</option>
-            <option value="prestashop">PrestaShop</option>
-            <option value="magento">Magento 2</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Plan list */}
-      <div className="grid gap-2 max-h-[320px] overflow-y-auto pr-1">
-        {filteredPlans.map((plan) => (
-          <PlanCard
-            key={plan.id || plan.name}
-            plan={plan}
-            selected={form.plan === (plan.name || plan.id)}
-            sym={sym}
-            onClick={() => setForm({ ...form, plan: plan.name || plan.id })}
-          />
-        ))}
-        {filteredPlans.length === 0 && (
-          <div className="text-center py-8 text-sm text-[var(--muted)]">
-            No plans match your filters. Try adjusting the CMS or CPU filter.
+      {/* Workload Selection */}
+      {cmsFilter && (
+        <div>
+          <label className="block text-sm font-medium mb-2">Expected workload</label>
+          <div className="grid grid-cols-3 gap-2">
+            {WORKLOAD_OPTIONS.map((wl) => {
+              const Icon = wl.icon;
+              return (
+                <button
+                  key={wl.id}
+                  type="button"
+                  onClick={() => { setWorkloadFilter(wl.id); setForm({ ...form, plan: "" }); }}
+                  className={`px-3 py-3 rounded-xl text-left transition-all ${
+                    workloadFilter === wl.id
+                      ? "bg-[var(--accent)]/10 border-2 border-[var(--accent)]"
+                      : "bg-[var(--background)] border border-[var(--border)] hover:border-[var(--accent)]/30"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon size={14} className={workloadFilter === wl.id ? "text-[var(--accent)]" : "text-[var(--muted)]"} />
+                    <span className={`text-xs font-semibold ${workloadFilter === wl.id ? "text-[var(--foreground)]" : "text-[var(--muted)]"}`}>
+                      {wl.label}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-[var(--muted)] leading-tight">{wl.desc}</p>
+                </button>
+              );
+            })}
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Region */}
+      {cmsFilter && (
+        <div>
+          <label className="block text-sm font-medium mb-1.5">Region</label>
+          <div className="flex gap-2 flex-wrap">
+            {availableRegions.slice(0, 12).map((r) => (
+              <button
+                key={r.id || r.name}
+                type="button"
+                onClick={() => setForm({ ...form, region: r.id || r.name })}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  form.region === (r.id || r.name)
+                    ? "bg-[var(--accent)] text-white"
+                    : "bg-[var(--background)] border border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent)]/50"
+                }`}
+              >
+                {r.city || r.name}{r.country ? ` (${r.country})` : ""}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Recommended Plans */}
+      {cmsFilter && (
+        <div>
+          <label className="block text-sm font-medium mb-2">
+            {hasResults ? "Recommended plans" : "No plans available"}
+          </label>
+
+          <div className="grid gap-2 max-h-[260px] overflow-y-auto pr-1">
+            {/* Perfect fit */}
+            {perfectPlans.map((plan, i) => (
+              <PlanCard
+                key={plan.id || plan.name}
+                plan={plan}
+                selected={form.plan === (plan.name || plan.id)}
+                sym={sym}
+                fitLevel="perfect"
+                isBestValue={i === 0}
+                onClick={() => setForm({ ...form, plan: plan.name || plan.id })}
+              />
+            ))}
+
+            {/* Good fit (separator) */}
+            {goodPlans.length > 0 && perfectPlans.length > 0 && (
+              <div className="flex items-center gap-2 py-1">
+                <div className="flex-1 h-px bg-[var(--border)]" />
+                <span className="text-[10px] text-[var(--muted)]">Also compatible</span>
+                <div className="flex-1 h-px bg-[var(--border)]" />
+              </div>
+            )}
+            {goodPlans.map((plan) => (
+              <PlanCard
+                key={plan.id || plan.name}
+                plan={plan}
+                selected={form.plan === (plan.name || plan.id)}
+                sym={sym}
+                fitLevel="good"
+                onClick={() => setForm({ ...form, plan: plan.name || plan.id })}
+              />
+            ))}
+
+            {!hasResults && cmsFilter && (
+              <div className="text-center py-8 text-sm text-[var(--muted)]">
+                No plans available for this CMS and workload combination with this provider.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* No CMS selected — show hint */}
+      {!cmsFilter && (
+        <div className="text-center py-6 text-sm text-[var(--muted)]">
+          Select a CMS above to see recommended server configurations
+        </div>
+      )}
 
       {/* Navigation */}
       <div className="flex justify-between pt-2">
@@ -957,27 +1050,38 @@ function CreatePlanStep({ plans, regions, loading, form, setForm, sym, provider,
 
 // ─── Plan Card ───────────────────────────────────────────────────────
 
-function PlanCard({ plan, selected, sym, onClick }: {
-  plan: Plan; selected: boolean; sym: string; onClick: () => void;
+function PlanCard({ plan, selected, sym, fitLevel, isBestValue, onClick }: {
+  plan: Plan; selected: boolean; sym: string; fitLevel: "perfect" | "good";
+  isBestValue?: boolean; onClick: () => void;
 }) {
-  const recommendations = (plan.cms_recommendations || []).filter((r) => r.level !== "insufficient");
-  const recommended = recommendations.filter((r) => r.level === "recommended");
-  const minimum = recommendations.filter((r) => r.level === "minimum");
-
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`w-full text-left px-4 py-3 rounded-xl transition-all ${
+      className={`w-full text-left px-4 py-3 rounded-xl transition-all relative ${
         selected
           ? "bg-[var(--accent)]/10 border-2 border-[var(--accent)] shadow-sm"
-          : "bg-[var(--background)] border border-[var(--border)] hover:border-[var(--accent)]/30"
+          : fitLevel === "perfect"
+            ? "bg-[var(--background)] border border-[var(--success)]/20 hover:border-[var(--accent)]/50"
+            : "bg-[var(--background)] border border-[var(--border)] hover:border-[var(--accent)]/30"
       }`}
     >
+      {/* Best value badge */}
+      {isBestValue && !selected && (
+        <span className="absolute -top-2 right-3 text-[9px] px-2 py-0.5 rounded-full bg-[var(--success)] text-white font-bold">
+          BEST VALUE
+        </span>
+      )}
+
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3 flex-1 min-w-0">
+          {/* Fit indicator */}
+          <div className={`w-2 h-2 rounded-full shrink-0 ${
+            fitLevel === "perfect" ? "bg-[var(--success)]" : "bg-[var(--warning)]"
+          }`} />
+
           {/* Plan name */}
-          <span className="font-mono font-bold text-sm w-[90px] shrink-0">{plan.name}</span>
+          <span className="font-mono font-bold text-sm w-[80px] shrink-0">{plan.name}</span>
 
           {/* Specs */}
           <div className="flex items-center gap-3 text-xs text-[var(--muted)]">
@@ -988,7 +1092,7 @@ function PlanCard({ plan, selected, sym, onClick }: {
               <MemoryStick size={11} /> {plan.memory_gb} GB
             </span>
             <span className="flex items-center gap-1">
-              <HardDrive size={11} /> {plan.disk_gb} GB {plan.disk_type || "SSD"}
+              <HardDrive size={11} /> {plan.disk_gb} GB {plan.disk_type || "NVMe"}
             </span>
             {plan.transfer_tb ? (
               <span className="flex items-center gap-1">
@@ -1015,22 +1119,6 @@ function PlanCard({ plan, selected, sym, onClick }: {
           )}
         </div>
       </div>
-
-      {/* CMS Badges */}
-      {recommendations.length > 0 && (
-        <div className="flex gap-1.5 mt-2 flex-wrap">
-          {recommended.slice(0, 5).map((r) => (
-            <span key={r.cms} className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--success)]/10 text-[var(--success)] font-medium flex items-center gap-0.5">
-              <Star size={8} /> {r.label}
-            </span>
-          ))}
-          {minimum.slice(0, 3).map((r) => (
-            <span key={r.cms} className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--border)] text-[var(--muted)] font-medium">
-              {r.label}
-            </span>
-          ))}
-        </div>
-      )}
     </button>
   );
 }
@@ -1089,28 +1177,6 @@ function CreateConfirmStep({ form, plans, regions, provider, providerName, sym, 
         You are billed directly by {providerName} — hourly, pay only for what you use.
       </div>
 
-      {/* CMS Compatibility */}
-      {plan?.cms_recommendations && (
-        <div className="border border-[var(--border)] rounded-lg p-3">
-          <div className="text-xs font-medium mb-2 text-[var(--muted)]">Compatible with:</div>
-          <div className="flex flex-wrap gap-1.5">
-            {plan.cms_recommendations
-              .filter((r) => r.level !== "insufficient")
-              .map((r) => (
-                <span
-                  key={r.cms}
-                  className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-                    r.level === "recommended"
-                      ? "bg-[var(--success)]/10 text-[var(--success)]"
-                      : "bg-[var(--border)] text-[var(--muted)]"
-                  }`}
-                >
-                  {r.level === "recommended" ? "★ " : ""}{r.label}
-                </span>
-              ))}
-          </div>
-        </div>
-      )}
 
       {error && (
         <div className="text-sm text-[var(--danger)] bg-[var(--danger)]/10 rounded-lg px-3 py-2">{error}</div>

@@ -1,13 +1,16 @@
 """CMS server requirements — maps CMS types to recommended specs.
 
-Used to show "Recommended for Odoo 18", "Minimum for WooCommerce", etc.
-on server plan selection in the wizard.
+Workload tiers:
+  - startup: small projects, few users, development/testing
+  - medium: production with moderate traffic, ~50-200 concurrent users
+  - intensive: high-traffic, large catalogs, heavy background jobs
 """
 
 from __future__ import annotations
 
 
-# Requirements per CMS (memory in MB, disk in GB)
+# Base requirements per CMS (memory in MB, disk in GB)
+# These represent "startup" workload. Medium and intensive scale up.
 CMS_REQUIREMENTS: dict[str, dict] = {
     "odoo-18": {
         "label": "Odoo 18",
@@ -101,6 +104,31 @@ CMS_REQUIREMENTS: dict[str, dict] = {
     },
 }
 
+# Workload multipliers: applied to rec_ram/rec_cores/rec_disk
+WORKLOAD_TIERS: dict[str, dict] = {
+    "startup": {
+        "label": "Startup",
+        "description": "Small projects, few users, dev/test",
+        "ram_mult": 1.0,
+        "cores_mult": 1.0,
+        "disk_mult": 1.0,
+    },
+    "medium": {
+        "label": "Medium",
+        "description": "Production, moderate traffic",
+        "ram_mult": 1.5,
+        "cores_mult": 1.5,
+        "disk_mult": 1.5,
+    },
+    "intensive": {
+        "label": "Intensive",
+        "description": "High traffic, large catalogs",
+        "ram_mult": 2.5,
+        "cores_mult": 2.0,
+        "disk_mult": 2.0,
+    },
+}
+
 
 def get_plan_recommendations(memory_mb: int, cores: int, disk_gb: int) -> list[dict]:
     """Given a plan's specs, return which CMS it supports and at what level.
@@ -123,9 +151,52 @@ def get_plan_recommendations(memory_mb: int, cores: int, disk_gb: int) -> list[d
     return results
 
 
+def get_workload_recommendations(
+    memory_mb: int, cores: int, disk_gb: int,
+    cms: str, workload: str = "startup",
+) -> dict:
+    """Check if a plan fits a specific CMS + workload combination.
+
+    Returns {"fit": "perfect"|"good"|"insufficient", "reason": str}.
+    """
+    req = CMS_REQUIREMENTS.get(cms)
+    if not req:
+        return {"fit": "insufficient", "reason": "Unknown CMS"}
+
+    tier = WORKLOAD_TIERS.get(workload, WORKLOAD_TIERS["startup"])
+
+    needed_ram = int(req["rec_ram_mb"] * tier["ram_mult"])
+    needed_cores = max(1, int(req["rec_cores"] * tier["cores_mult"]))
+    needed_disk = int(req["rec_disk_gb"] * tier["disk_mult"])
+
+    if memory_mb >= needed_ram and cores >= needed_cores and disk_gb >= needed_disk:
+        return {"fit": "perfect", "reason": f"Ideal for {req['label']} ({tier['label']})"}
+
+    # Check if at least minimum (startup-level) is met
+    if memory_mb >= req["min_ram_mb"] and cores >= req["min_cores"] and disk_gb >= req["min_disk_gb"]:
+        bottlenecks = []
+        if memory_mb < needed_ram:
+            bottlenecks.append(f"RAM ({memory_mb}MB < {needed_ram}MB)")
+        if cores < needed_cores:
+            bottlenecks.append(f"CPU ({cores} < {needed_cores})")
+        if disk_gb < needed_disk:
+            bottlenecks.append(f"Disk ({disk_gb}GB < {needed_disk}GB)")
+        return {"fit": "good", "reason": f"Usable but tight: {', '.join(bottlenecks)}"}
+
+    return {"fit": "insufficient", "reason": f"Below minimum for {req['label']}"}
+
+
 def get_cms_list() -> list[dict]:
     """Return all supported CMS with their requirements."""
     return [
         {"id": k, **v}
         for k, v in CMS_REQUIREMENTS.items()
+    ]
+
+
+def get_workload_list() -> list[dict]:
+    """Return all workload tiers."""
+    return [
+        {"id": k, **v}
+        for k, v in WORKLOAD_TIERS.items()
     ]

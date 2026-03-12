@@ -20,7 +20,7 @@ from core.cloud_providers.hetzner import HetznerClient
 from core.cloud_providers.digitalocean import DigitalOceanClient
 from core.cloud_providers.vultr import VultrClient
 from core.cloud_providers.linode import LinodeClient
-from core.cloud_providers.cms_requirements import get_plan_recommendations, get_cms_list
+from core.cloud_providers.cms_requirements import get_plan_recommendations, get_cms_list, get_workload_list, get_workload_recommendations
 from core.ssh_keys import get_public_key, get_private_key_path
 from core.vm_controller import VMDriver
 from core.server_manager import ServerInfo, ServerType
@@ -85,6 +85,12 @@ async def list_cms_requirements(user: dict = Depends(get_current_user)):
     return get_cms_list()
 
 
+@router.get("/workload-tiers")
+async def list_workload_tiers(user: dict = Depends(get_current_user)):
+    """List available workload tiers (startup, medium, intensive)."""
+    return get_workload_list()
+
+
 # ─── Generic Plans (any provider) ────────────────────────────────────
 
 @router.get("/{provider}/plans")
@@ -103,12 +109,23 @@ async def list_plans(provider: str, user: dict = Depends(get_current_user)):
     else:
         return []
 
-    # Enrich each plan with CMS recommendations
+    # Enrich each plan with CMS recommendations + workload fit
     for plan in plans:
         memory_mb = plan.get("memory_mb", int(plan.get("memory_gb", 0) * 1024))
         cores = plan.get("cores", 0)
         disk_gb = plan.get("disk_gb", 0)
         plan["cms_recommendations"] = get_plan_recommendations(memory_mb, cores, disk_gb)
+
+        # Pre-compute workload fit for all CMS x workload combinations
+        workload_fit: dict[str, dict[str, dict]] = {}
+        for cms_id in ["odoo-18", "odoo-17", "odoo-16", "odoo-15", "odoo-14",
+                        "wordpress", "woocommerce", "prestashop", "magento"]:
+            workload_fit[cms_id] = {}
+            for wl in ["startup", "medium", "intensive"]:
+                workload_fit[cms_id][wl] = get_workload_recommendations(
+                    memory_mb, cores, disk_gb, cms_id, wl,
+                )
+        plan["workload_fit"] = workload_fit
 
     return plans
 

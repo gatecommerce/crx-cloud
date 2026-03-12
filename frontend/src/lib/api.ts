@@ -92,6 +92,7 @@ export const backupsApi = {
 export const cloudApi = {
   providers: () => apiFetch<{ id: string; name: string; available: boolean; currency: string }[]>("/api/v1/cloud/available"),
   cmsRequirements: () => apiFetch<any[]>("/api/v1/cloud/cms-requirements"),
+  workloadTiers: () => apiFetch<any[]>("/api/v1/cloud/workload-tiers"),
   // Generic endpoints per provider
   plans: (provider: string) => apiFetch<any[]>(`/api/v1/cloud/${provider}/plans`),
   regions: (provider: string) => apiFetch<any[]>(`/api/v1/cloud/${provider}/regions`),
