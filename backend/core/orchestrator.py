@@ -82,6 +82,7 @@ async def deploy_instance(inst: Instance, server: Server, db: AsyncSession) -> N
     Updates DB status: deploying -> running | error.
     Called as a background task after the API returns 201.
     """
+    inst_name = inst.name  # Cache before any commit
     plugin = get_plugin(inst.cms_type)
     if not plugin:
         inst.status = "error"
@@ -116,7 +117,7 @@ async def deploy_instance(inst: Instance, server: Server, db: AsyncSession) -> N
             },
         }
 
-        logger.info(f"Deploying {inst.cms_type} instance {inst.name} on {server.name}:{port}")
+        logger.info(f"Deploying {inst.cms_type} instance {inst_name} on {server.name}:{port}")
         cms_instance = await plugin.deploy(server.id, deploy_config)
 
         # Update DB with deploy results
@@ -128,7 +129,8 @@ async def deploy_instance(inst: Instance, server: Server, db: AsyncSession) -> N
             "port": port,
         }
         await db.commit()
-        logger.info(f"Instance {inst.name} deployed successfully: {inst.url}")
+        await db.refresh(inst)
+        logger.info(f"Instance {inst_name} deployed successfully: {inst.url}")
 
         # Configure DNS + Nginx reverse proxy if domain is set
         if inst.domain:
@@ -167,7 +169,11 @@ async def deploy_instance(inst: Instance, server: Server, db: AsyncSession) -> N
                 logger.warning(f"Nginx setup error for {inst.domain}: {e}")
 
     except Exception as e:
-        logger.error(f"Deploy failed for {inst.name}: {e}")
+        logger.error(f"Deploy failed for {inst_name}: {e}")
+        try:
+            await db.refresh(inst)
+        except Exception:
+            pass
         inst.status = "error"
         inst.config = {**(inst.config or {}), "error": str(e)}
         await db.commit()
@@ -287,18 +293,33 @@ async def update_instance_settings(inst: Instance, server: Server, db: AsyncSess
 
     Called as a background task after the API returns the updated instance.
     """
-    plugin = get_plugin(inst.cms_type)
+    # Cache values before any commit (SQLAlchemy expires ORM attrs after commit)
+    inst_id = inst.id
+    inst_name = inst.name
+    inst_version = inst.version or "19.0"
+    inst_cms_type = inst.cms_type
+
+    plugin = get_plugin(inst_cms_type)
     if not plugin:
-        logger.error(f"No plugin for {inst.cms_type} — cannot update settings")
+        logger.error(f"No plugin for {inst_cms_type} — cannot update settings")
         return
+
+    async def _refresh():
+        """Refresh instance from DB after commit to avoid expired attrs."""
+        await db.refresh(inst)
+
+    async def _update_config(updates: dict):
+        """Safely merge updates into inst.config and commit."""
+        await _refresh()
+        inst.config = {**(inst.config or {}), **updates}
+        await db.commit()
 
     try:
         # Enterprise edition toggle
         if "enterprise" in settings and settings["enterprise"]:
             from pathlib import Path
 
-            version = inst.version or "19.0"
-            enterprise_dir = Path("data/enterprise") / version
+            enterprise_dir = Path("data/enterprise") / inst_version
             package_file = None
             for f in enterprise_dir.iterdir() if enterprise_dir.exists() else []:
                 if f.suffix in (".gz", ".tgz", ".zip") or f.name.endswith(".tar.gz"):
@@ -306,57 +327,64 @@ async def update_instance_settings(inst: Instance, server: Server, db: AsyncSess
                     break
 
             if not package_file:
-                logger.error(f"No enterprise package found for v{version}")
-                inst.config = {**(inst.config or {}), "enterprise_error": f"No package for v{version}"}
-                await db.commit()
+                logger.error(f"No enterprise package found for v{inst_version}")
+                await _update_config({"enterprise_error": f"No package for v{inst_version}"})
                 return
 
             # Lock instance — prevent other operations
             inst.status = "upgrading"
-            inst.config = {**(inst.config or {}), "enterprise_progress": "Uploading enterprise addons to server..."}
-            await db.commit()
+            await _update_config({"enterprise_progress": "Uploading enterprise addons to server..."})
+            logger.info(f"Starting enterprise activation for {inst_name}")
 
             try:
                 server_info = _server_info_from_db(server)
+                await _refresh()
                 cms = _db_to_cms_instance(inst, server)
 
                 # Step 1: Upload + extract enterprise addons on server
-                inst.config = {**(inst.config or {}), "enterprise_progress": "Extracting enterprise addons on server..."}
-                await db.commit()
+                await _update_config({"enterprise_progress": "Extracting enterprise addons on server..."})
+                logger.info(f"Syncing enterprise addons for {inst_name} v{inst_version}")
 
-                ok = await plugin.sync_enterprise_addons(server_info, version, str(package_file))
+                ok = await plugin.sync_enterprise_addons(server_info, inst_version, str(package_file))
                 if not ok:
                     raise RuntimeError("Failed to sync enterprise addons to server")
 
                 # Step 2: Enable enterprise (update compose, restart, install web_enterprise)
-                inst.config = {**(inst.config or {}), "enterprise_progress": "Activating enterprise modules..."}
-                await db.commit()
+                await _update_config({"enterprise_progress": "Activating enterprise modules..."})
+                logger.info(f"Enabling enterprise for {inst_name}")
 
+                # Rebuild cms with fresh state
+                await _refresh()
+                cms = _db_to_cms_instance(inst, server)
                 ok = await plugin.enable_enterprise(cms)
                 if not ok:
                     raise RuntimeError("Failed to enable enterprise on instance")
 
                 # Success
                 inst.status = "running"
-                inst.config = {**(inst.config or {}), "enterprise": True, "enterprise_progress": None, "enterprise_error": None}
-                await db.commit()
-                logger.info(f"Enterprise enabled for {inst.name}")
+                await _update_config({"enterprise": True, "enterprise_progress": None, "enterprise_error": None})
+                logger.info(f"Enterprise enabled for {inst_name}")
 
             except Exception as e:
-                logger.error(f"Enterprise activation failed for {inst.name}: {e}")
+                logger.error(f"Enterprise activation failed for {inst_name}: {e}")
+                try:
+                    await _refresh()
+                except Exception:
+                    pass
                 inst.status = "running"
-                inst.config = {**(inst.config or {}), "enterprise": False, "enterprise_error": str(e), "enterprise_progress": None}
-                await db.commit()
+                await _update_config({"enterprise": False, "enterprise_error": str(e), "enterprise_progress": None})
                 return
 
         elif "enterprise" in settings and not settings["enterprise"]:
             # Disable enterprise — revert to community compose
+            await _refresh()
             cms = _db_to_cms_instance(inst, server)
             ok = await plugin.update_compose(cms, {"enterprise": False})
-            logger.info(f"Enterprise disabled for {inst.name}")
+            logger.info(f"Enterprise disabled for {inst_name}")
 
         # SSL toggle
         if "auto_ssl" in settings:
+            await _refresh()
             if inst.domain:
                 port = (inst.config or {}).get("port", 8069)
                 if settings["auto_ssl"]:
@@ -377,7 +405,6 @@ async def update_instance_settings(inst: Instance, server: Server, db: AsyncSess
                     else:
                         logger.warning(f"SSL setup failed for {inst.domain}")
                 else:
-                    # Reconfigure nginx without SSL
                     nginx_ok = await setup_nginx(
                         host=server.endpoint,
                         ssh_user=server.ssh_user or "root",
@@ -394,13 +421,16 @@ async def update_instance_settings(inst: Instance, server: Server, db: AsyncSess
                         logger.info(f"SSL disabled for {inst.domain}")
 
         # Merge settings into config
-        inst.config = {**(inst.config or {}), **settings}
-        await db.commit()
+        await _update_config(settings)
 
     except Exception as e:
-        logger.error(f"Failed to update settings for {inst.name}: {e}")
-        inst.config = {**(inst.config or {}), "settings_error": str(e)}
-        await db.commit()
+        logger.error(f"Failed to update settings for {inst_name}: {e}")
+        try:
+            await _refresh()
+            inst.config = {**(inst.config or {}), "settings_error": str(e)}
+            await db.commit()
+        except Exception as e2:
+            logger.error(f"Failed to save error state for {inst_name}: {e2}")
 
 
 async def update_instance_domain(inst: Instance, server: Server, db: AsyncSession, domain_data: dict) -> None:
@@ -408,6 +438,7 @@ async def update_instance_domain(inst: Instance, server: Server, db: AsyncSessio
 
     Called as a background task after the API returns the updated instance.
     """
+    inst_name = inst.name  # Cache before any commit
     try:
         old_domain = inst.domain
         new_domain = domain_data.get("domain") or inst.domain
@@ -476,12 +507,16 @@ async def update_instance_domain(inst: Instance, server: Server, db: AsyncSessio
             "http_redirect": domain_data.get("http_redirect", True),
         }
         await db.commit()
-        logger.info(f"Domain updated for {inst.name}: {old_domain} -> {new_domain}")
+        logger.info(f"Domain updated for {inst_name}: {old_domain} -> {new_domain}")
 
     except Exception as e:
-        logger.error(f"Failed to update domain for {inst.name}: {e}")
-        inst.config = {**(inst.config or {}), "domain_error": str(e)}
-        await db.commit()
+        logger.error(f"Failed to update domain for {inst_name}: {e}")
+        try:
+            await db.refresh(inst)
+            inst.config = {**(inst.config or {}), "domain_error": str(e)}
+            await db.commit()
+        except Exception as e2:
+            logger.error(f"Failed to save domain error state for {inst_name}: {e2}")
 
 
 async def get_instance_logs(inst: Instance, server: Server, lines: int = 100) -> str:
