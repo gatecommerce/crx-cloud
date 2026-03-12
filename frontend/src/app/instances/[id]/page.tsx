@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AuthGuard } from "@/components/AuthGuard";
 import { Sidebar } from "@/components/dashboard/Sidebar";
@@ -14,7 +14,8 @@ import {
   RefreshCw, Plus, ChevronDown, ChevronUp, Globe,
   LayoutDashboard, Settings2, Puzzle, GitBranch, Activity, Wrench,
   Eye, EyeOff, Copy, Shield, Bell, BellOff, Calendar,
-  Save, ArrowUpDown, Gauge, HardDrive, Zap
+  Save, ArrowUpDown, Gauge, HardDrive, Zap,
+  Package, Library, GitCommit, Search, X, ChevronRight, BookOpen
 } from "lucide-react";
 
 type TabId = "dashboard" | "logs" | "backups" | "config" | "addons" | "staging" | "monitoring" | "settings";
@@ -99,6 +100,22 @@ export default function InstanceDetailPage() {
   const [addons, setAddons] = useState<any[]>([]);
   const [addonsLoading, setAddonsLoading] = useState(false);
   const [addonUpdating, setAddonUpdating] = useState(false);
+
+  // Git addon state
+  const [showAddGitModal, setShowAddGitModal] = useState(false);
+  const [showOcaModal, setShowOcaModal] = useState(false);
+  const [showAddonSettingsModal, setShowAddonSettingsModal] = useState<any>(null);
+  const [showUpdateModal, setShowUpdateModal] = useState<any>(null);
+  const [showModulesPanel, setShowModulesPanel] = useState<any>(null);
+  const [addonModules, setAddonModules] = useState<any[]>([]);
+  const [modulesLoading, setModulesLoading] = useState(false);
+  const [ocaCatalog, setOcaCatalog] = useState<any[]>([]);
+  const [ocaSearch, setOcaSearch] = useState("");
+  const [conflicts, setConflicts] = useState<any>(null);
+  const [compatibility, setCompatibility] = useState<any>(null);
+  const [gitAddonForm, setGitAddonForm] = useState({ url: "", branch: "", copy_method: "all" as "all" | "specific", specific_addons: "" });
+  const [gitAddonAdding, setGitAddonAdding] = useState(false);
+  const [gitAddonRemoving, setGitAddonRemoving] = useState<string | null>(null);
 
   // Backups schedule state
   const [backupSchedule, setBackupSchedule] = useState({
@@ -905,6 +922,34 @@ export default function InstanceDetailPage() {
               {/* ========== ADDONS TAB ========== */}
               {activeTab === "addons" && (
                 <div>
+                  {/* Conflict & Compatibility Warnings */}
+                  {conflicts?.conflicts?.length > 0 && (
+                    <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                      <div className="flex items-center gap-2 mb-1">
+                        <AlertTriangle size={14} className="text-red-400 shrink-0" />
+                        <span className="text-sm font-medium text-red-300">Module Conflicts Detected</span>
+                      </div>
+                      {conflicts.conflicts.map((c: any, i: number) => (
+                        <p key={i} className="text-xs text-red-400 ml-6">
+                          {c.module} found in {c.sources?.join(" and ") || "multiple addons"}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                  {compatibility?.issues?.length > 0 && (
+                    <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                      <div className="flex items-center gap-2 mb-1">
+                        <AlertTriangle size={14} className="text-amber-400 shrink-0" />
+                        <span className="text-sm font-medium text-amber-300">Compatibility Warnings</span>
+                      </div>
+                      {compatibility.issues.map((c: any, i: number) => (
+                        <p key={i} className="text-xs text-amber-400 ml-6">
+                          Version mismatch: {c.module} (v{c.module_version}) is not compatible with Odoo {instance?.version}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Addons Table — Cloudpepper style */}
                   <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 mb-4">
                     <h3 className="text-sm font-semibold mb-4">Addons</h3>
@@ -919,7 +964,7 @@ export default function InstanceDetailPage() {
                         <Puzzle size={32} className="mx-auto text-[var(--muted)] mb-3" />
                         <p className="text-sm text-[var(--muted)]">No addons installed yet.</p>
                         <p className="text-xs text-[var(--muted)] mt-1">
-                          Enable Enterprise Edition in Settings to add Odoo Enterprise addons.
+                          Add a Git repository or enable Enterprise Edition in Settings.
                         </p>
                       </div>
                     ) : (
@@ -928,7 +973,7 @@ export default function InstanceDetailPage() {
                           <thead>
                             <tr className="text-left text-xs text-[var(--muted)] uppercase tracking-wider border-b border-[var(--border)]">
                               <th className="pb-3 pr-4">Type</th>
-                              <th className="pb-3 pr-4">Name</th>
+                              <th className="pb-3 pr-4">Repo / Name</th>
                               <th className="pb-3 pr-4">Branch</th>
                               <th className="pb-3 pr-4">Revision</th>
                               <th className="pb-3 pr-4">Status</th>
@@ -937,97 +982,287 @@ export default function InstanceDetailPage() {
                           </thead>
                           <tbody>
                             {addons.map((addon, idx) => (
-                              <tr key={idx} className="border-b border-white/5 last:border-0">
-                                <td className="py-3 pr-4">
-                                  <span className="text-xs px-2 py-1 rounded bg-[var(--accent)]/10 text-[var(--accent)] font-medium capitalize">
-                                    {addon.type}
-                                  </span>
-                                </td>
-                                <td className="py-3 pr-4 font-medium text-white">{addon.name}</td>
-                                <td className="py-3 pr-4">
-                                  <span className="text-xs px-2 py-1 rounded bg-white/5 text-[var(--muted)] font-mono">
-                                    {addon.branch}
-                                  </span>
-                                </td>
-                                <td className="py-3 pr-4">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs px-2 py-0.5 rounded bg-[var(--accent)]/10 text-[var(--accent)] font-mono">
-                                      {addon.revision_date || "—"}
+                              <React.Fragment key={addon.id || idx}>
+                                <tr className="border-b border-white/5 last:border-0">
+                                  <td className="py-3 pr-4">
+                                    <span className={`text-xs px-2 py-1 rounded font-medium capitalize ${
+                                      addon.type === "git"
+                                        ? "bg-purple-500/10 text-purple-400"
+                                        : "bg-[var(--accent)]/10 text-[var(--accent)]"
+                                    }`}>
+                                      {addon.type === "git" ? (
+                                        <span className="flex items-center gap-1"><GitBranch size={10} /> Git</span>
+                                      ) : (
+                                        <span className="flex items-center gap-1"><Package size={10} /> File</span>
+                                      )}
                                     </span>
-                                    {addon.update_available && addon.available_revision_date && (
-                                      <span className="text-xs text-amber-400" title={`New version available: ${addon.available_revision_date}`}>
-                                        → {addon.available_revision_date}
-                                      </span>
+                                  </td>
+                                  <td className="py-3 pr-4">
+                                    {addon.type === "git" && addon.url ? (
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-medium text-white truncate max-w-[200px]" title={addon.url}>
+                                          {addon.name || addon.url.replace(/\.git$/, "").split("/").slice(-2).join("/")}
+                                        </span>
+                                        <a
+                                          href={addon.url.replace(/\.git$/, "")}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-[var(--muted)] hover:text-[var(--accent)] shrink-0"
+                                          title="Open repository"
+                                        >
+                                          <ExternalLink size={12} />
+                                        </a>
+                                        {addon.module_count != null && (
+                                          <span className="text-xs px-1.5 py-0.5 rounded bg-white/5 text-[var(--muted)]" title={`${addon.module_count} modules`}>
+                                            {addon.module_count}
+                                          </span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="font-medium text-white">{addon.name}</span>
                                     )}
-                                  </div>
-                                </td>
-                                <td className="py-3 pr-4">
-                                  <span className={`text-xs px-2 py-1 rounded-full capitalize ${
-                                    addon.status === "installed"
-                                      ? "bg-[var(--success)]/10 text-[var(--success)]"
-                                      : "bg-[var(--warning)]/10 text-[var(--warning)]"
-                                  }`}>
-                                    {addon.status}
-                                  </span>
-                                </td>
-                                <td className="py-3 text-right">
-                                  <div className="flex items-center justify-end gap-2">
-                                    {addon.can_update && (
-                                      <button
-                                        onClick={async () => {
-                                          if (!confirm("Update enterprise addons? This will re-sync from the global package and restart the instance.")) return;
-                                          setAddonUpdating(true);
-                                          try {
-                                            await instancesApi.updateEnterpriseAddons(instanceId);
-                                            // Poll for completion
-                                            const poll = setInterval(async () => {
+                                  </td>
+                                  <td className="py-3 pr-4">
+                                    <span className="text-xs px-2 py-1 rounded bg-white/5 text-[var(--muted)] font-mono flex items-center gap-1 w-fit">
+                                      <GitBranch size={10} />
+                                      {addon.branch}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 pr-4">
+                                    <div className="flex items-center gap-2">
+                                      {addon.type === "git" && addon.commit ? (
+                                        <span className="text-xs px-2 py-0.5 rounded bg-[var(--accent)]/10 text-[var(--accent)] font-mono flex items-center gap-1" title={addon.commit}>
+                                          <GitCommit size={10} />
+                                          {addon.commit?.substring(0, 7)}
+                                        </span>
+                                      ) : (
+                                        <span className="text-xs px-2 py-0.5 rounded bg-[var(--accent)]/10 text-[var(--accent)] font-mono">
+                                          {addon.revision_date || "\u2014"}
+                                        </span>
+                                      )}
+                                      {addon.update_available && addon.available_revision_date && (
+                                        <span className="text-xs text-amber-400" title={`New version available: ${addon.available_revision_date}`}>
+                                          &rarr; {addon.available_revision_date}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="py-3 pr-4">
+                                    <span className={`text-xs px-2 py-1 rounded-full capitalize ${
+                                      addon.status === "installed" ? "bg-[var(--success)]/10 text-[var(--success)]" :
+                                      addon.status === "cloning" ? "bg-blue-500/10 text-blue-400 animate-pulse" :
+                                      addon.status === "error" ? "bg-red-500/10 text-red-400" :
+                                      addon.status === "pending" ? "bg-amber-500/10 text-amber-400" :
+                                      "bg-[var(--warning)]/10 text-[var(--warning)]"
+                                    }`}>
+                                      {addon.status === "cloning" && <Loader2 size={10} className="inline animate-spin mr-1" />}
+                                      {addon.status}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 text-right">
+                                    <div className="flex items-center justify-end gap-1.5">
+                                      {/* Git addon actions */}
+                                      {addon.type === "git" && (
+                                        <>
+                                          <button
+                                            onClick={async () => {
+                                              if (showModulesPanel?.id === addon.id) {
+                                                setShowModulesPanel(null);
+                                                return;
+                                              }
+                                              setShowModulesPanel(addon);
+                                              setModulesLoading(true);
                                               try {
-                                                const data = await instancesApi.get(instanceId);
-                                                setInstance(data);
-                                                if (data.status !== "upgrading") {
-                                                  clearInterval(poll);
+                                                const data = await instancesApi.getAddonModules(instanceId, addon.id);
+                                                setAddonModules(data.modules || data || []);
+                                              } catch { setAddonModules([]); }
+                                              finally { setModulesLoading(false); }
+                                            }}
+                                            className={`p-1.5 text-xs rounded-lg border transition-colors ${
+                                              showModulesPanel?.id === addon.id
+                                                ? "border-[var(--accent)] text-[var(--accent)] bg-[var(--accent)]/10"
+                                                : "border-[var(--border)] hover:bg-white/5 text-[var(--muted)] hover:text-white"
+                                            }`}
+                                            title="Explore modules"
+                                          >
+                                            <Eye size={13} />
+                                          </button>
+                                          <button
+                                            onClick={() => setShowAddonSettingsModal(addon)}
+                                            className="p-1.5 text-xs rounded-lg border border-[var(--border)] hover:bg-white/5 text-[var(--muted)] hover:text-white transition-colors"
+                                            title="Repository settings"
+                                          >
+                                            <Settings2 size={13} />
+                                          </button>
+                                          <button
+                                            onClick={async () => {
+                                              try {
+                                                const result = await instancesApi.updateGitAddon(instanceId, addon.id);
+                                                setShowUpdateModal({ addon, result });
+                                              } catch (e: any) {
+                                                alert(e.message || "Failed to check for updates");
+                                              }
+                                            }}
+                                            disabled={instance?.status !== "running"}
+                                            className="p-1.5 text-xs rounded-lg border border-[var(--border)] hover:bg-white/5 text-[var(--muted)] hover:text-white transition-colors disabled:opacity-50"
+                                            title="Update"
+                                          >
+                                            <RefreshCw size={13} />
+                                          </button>
+                                          <button
+                                            onClick={async () => {
+                                              if (!confirm(`Remove this git addon (${addon.name || addon.url})? The repository will be deleted from the instance.`)) return;
+                                              setGitAddonRemoving(addon.id);
+                                              try {
+                                                await instancesApi.removeGitAddon(instanceId, addon.id);
+                                                loadAddons();
+                                              } catch (e: any) {
+                                                alert(e.message || "Failed to remove addon");
+                                              } finally {
+                                                setGitAddonRemoving(null);
+                                              }
+                                            }}
+                                            disabled={gitAddonRemoving === addon.id || instance?.status !== "running"}
+                                            className="p-1.5 text-xs rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+                                            title="Remove"
+                                          >
+                                            {gitAddonRemoving === addon.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                                          </button>
+                                        </>
+                                      )}
+
+                                      {/* Enterprise / File addon actions */}
+                                      {addon.type !== "git" && (
+                                        <>
+                                          {addon.can_update && (
+                                            <button
+                                              onClick={async () => {
+                                                if (!confirm("Update enterprise addons? This will re-sync from the global package and restart the instance.")) return;
+                                                setAddonUpdating(true);
+                                                try {
+                                                  await instancesApi.updateEnterpriseAddons(instanceId);
+                                                  const poll = setInterval(async () => {
+                                                    try {
+                                                      const data = await instancesApi.get(instanceId);
+                                                      setInstance(data);
+                                                      if (data.status !== "upgrading") {
+                                                        clearInterval(poll);
+                                                        setAddonUpdating(false);
+                                                        loadAddons();
+                                                      }
+                                                    } catch {}
+                                                  }, 3000);
+                                                } catch (e: any) {
+                                                  alert(e.message || "Failed to update addons");
                                                   setAddonUpdating(false);
-                                                  loadAddons();
                                                 }
-                                              } catch {}
-                                            }, 3000);
-                                          } catch (e: any) {
-                                            alert(e.message || "Failed to update addons");
-                                            setAddonUpdating(false);
-                                          }
-                                        }}
-                                        disabled={addonUpdating || instance?.status !== "running"}
-                                        className={`px-3 py-1.5 text-xs rounded-lg border transition-colors disabled:opacity-50 flex items-center gap-1.5 ${
-                                          addon.update_available
-                                            ? "border-amber-500/50 text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 animate-pulse"
-                                            : "border-[var(--border)] hover:bg-white/5"
-                                        }`}
-                                      >
-                                        {addonUpdating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                                        {addon.update_available ? "Update Available" : "Update"}
-                                      </button>
-                                    )}
-                                    {addon.can_delete && (
-                                      <button
-                                        onClick={async () => {
-                                          if (!confirm("⚠️ ATTENZIONE: Rimuovere Enterprise riporterà l'istanza a Community edition.\n\nSe i moduli enterprise sono installati nel database, Odoo potrebbe non funzionare correttamente.\n\nL'istanza verrà riavviata. Continuare?")) return;
-                                          try {
-                                            await instancesApi.removeEnterpriseAddons(instanceId);
-                                            loadAddons();
-                                            loadInstance();
-                                          } catch (e: any) {
-                                            alert(e.message || "Failed to remove addon");
-                                          }
-                                        }}
-                                        disabled={instance?.status !== "running"}
-                                        className="px-3 py-1.5 text-xs rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
-                                      >
-                                        Delete
-                                      </button>
-                                    )}
-                                  </div>
-                                </td>
-                              </tr>
+                                              }}
+                                              disabled={addonUpdating || instance?.status !== "running"}
+                                              className={`px-3 py-1.5 text-xs rounded-lg border transition-colors disabled:opacity-50 flex items-center gap-1.5 ${
+                                                addon.update_available
+                                                  ? "border-amber-500/50 text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 animate-pulse"
+                                                  : "border-[var(--border)] hover:bg-white/5"
+                                              }`}
+                                            >
+                                              {addonUpdating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                                              {addon.update_available ? "Update Available" : "Update"}
+                                            </button>
+                                          )}
+                                          {addon.can_delete && (
+                                            <button
+                                              onClick={async () => {
+                                                if (!confirm("Remove Enterprise addons? This will revert the instance to Community edition.\n\nIf enterprise modules are installed in the database, Odoo may not function correctly.\n\nThe instance will be restarted. Continue?")) return;
+                                                try {
+                                                  await instancesApi.removeEnterpriseAddons(instanceId);
+                                                  loadAddons();
+                                                  loadInstance();
+                                                } catch (e: any) {
+                                                  alert(e.message || "Failed to remove addon");
+                                                }
+                                              }}
+                                              disabled={instance?.status !== "running"}
+                                              className="px-3 py-1.5 text-xs rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+                                            >
+                                              Delete
+                                            </button>
+                                          )}
+                                        </>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+
+                                {/* Module Explorer Panel — inline expansion */}
+                                {showModulesPanel?.id === addon.id && addon.type === "git" && (
+                                  <tr>
+                                    <td colSpan={6} className="p-0">
+                                      <div className="bg-[var(--background)] border-t border-[var(--border)] p-4">
+                                        <div className="flex items-center justify-between mb-3">
+                                          <h4 className="text-sm font-medium text-white flex items-center gap-2">
+                                            <BookOpen size={14} />
+                                            Modules in {addon.name || "repository"}
+                                            {!modulesLoading && (
+                                              <span className="text-xs px-1.5 py-0.5 rounded bg-white/10 text-[var(--muted)]">
+                                                {addonModules.length}
+                                              </span>
+                                            )}
+                                          </h4>
+                                          <button
+                                            onClick={() => setShowModulesPanel(null)}
+                                            className="text-[var(--muted)] hover:text-white"
+                                          >
+                                            <X size={14} />
+                                          </button>
+                                        </div>
+
+                                        {modulesLoading ? (
+                                          <div className="text-center py-4">
+                                            <Loader2 size={16} className="mx-auto animate-spin text-[var(--muted)]" />
+                                          </div>
+                                        ) : addonModules.length === 0 ? (
+                                          <p className="text-xs text-[var(--muted)] py-2">No modules found in this repository.</p>
+                                        ) : (
+                                          <div className="grid gap-1.5 max-h-64 overflow-y-auto">
+                                            {addonModules.map((mod: any, mi: number) => {
+                                              const versionMatch = mod.version?.startsWith(instance?.version);
+                                              return (
+                                                <div key={mi} className="flex items-center justify-between px-3 py-2 rounded-lg bg-[var(--card)] border border-white/5 text-xs">
+                                                  <div className="flex items-center gap-3">
+                                                    <span className="font-mono text-white font-medium">{mod.technical_name || mod.name}</span>
+                                                    {mod.display_name && mod.display_name !== mod.technical_name && (
+                                                      <span className="text-[var(--muted)]">{mod.display_name}</span>
+                                                    )}
+                                                  </div>
+                                                  <div className="flex items-center gap-2">
+                                                    {mod.version && (
+                                                      <span className={`px-1.5 py-0.5 rounded ${
+                                                        versionMatch
+                                                          ? "bg-[var(--success)]/10 text-[var(--success)]"
+                                                          : "bg-amber-500/10 text-amber-400"
+                                                      }`} title={versionMatch ? "Compatible" : "Version mismatch"}>
+                                                        {versionMatch ? <CheckCircle size={10} className="inline mr-0.5" /> : <AlertTriangle size={10} className="inline mr-0.5" />}
+                                                        {mod.version}
+                                                      </span>
+                                                    )}
+                                                    {mod.installable === false && (
+                                                      <span className="px-1.5 py-0.5 rounded bg-red-500/10 text-red-400">not installable</span>
+                                                    )}
+                                                    {mod.dependencies?.length > 0 && (
+                                                      <span className="text-[var(--muted)]" title={`Dependencies: ${mod.dependencies.join(", ")}`}>
+                                                        {mod.dependencies.length} deps
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
                             ))}
                           </tbody>
                         </table>
@@ -1044,6 +1279,56 @@ export default function InstanceDetailPage() {
                         </div>
                       </div>
                     )}
+
+                    {/* Action buttons row */}
+                    <div className="mt-4 flex items-center gap-3 flex-wrap">
+                      <button
+                        onClick={() => {
+                          setGitAddonForm({ url: "", branch: instance?.version || "", copy_method: "all", specific_addons: "" });
+                          setShowAddGitModal(true);
+                        }}
+                        className="px-4 py-2 text-sm rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors flex items-center gap-2"
+                      >
+                        <Plus size={14} /> Add Git Repository
+                      </button>
+                      <button
+                        onClick={async () => {
+                          setShowOcaModal(true);
+                          if (ocaCatalog.length === 0) {
+                            try {
+                              const data = await instancesApi.getOcaCatalog();
+                              setOcaCatalog(data);
+                            } catch { setOcaCatalog([]); }
+                          }
+                        }}
+                        className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-white/5 transition-colors flex items-center gap-2"
+                      >
+                        <Library size={14} /> OCA Catalog
+                      </button>
+                      <div className="flex-1" />
+                      <button
+                        onClick={async () => {
+                          try {
+                            const data = await instancesApi.checkConflicts(instanceId);
+                            setConflicts(data);
+                          } catch {}
+                        }}
+                        className="text-xs text-[var(--muted)] hover:text-white transition-colors flex items-center gap-1"
+                      >
+                        <AlertTriangle size={12} /> Check Conflicts
+                      </button>
+                      <button
+                        onClick={async () => {
+                          try {
+                            const data = await instancesApi.checkCompatibility(instanceId);
+                            setCompatibility(data);
+                          } catch {}
+                        }}
+                        className="text-xs text-[var(--muted)] hover:text-white transition-colors flex items-center gap-1"
+                      >
+                        <CheckCircle size={12} /> Check Compatibility
+                      </button>
+                    </div>
                   </div>
 
                   {/* Install Custom Module */}
@@ -1326,6 +1611,383 @@ export default function InstanceDetailPage() {
           </main>
           <VitoChat />
         </div>
+
+        {/* Add Git Repository Modal */}
+        {showAddGitModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+            onClick={(e) => { if (e.target === e.currentTarget) setShowAddGitModal(false); }}
+            onKeyDown={(e) => { if (e.key === "Escape") setShowAddGitModal(false); }}
+          >
+            <div className="bg-[var(--card)] border border-white/10 rounded-2xl p-6 w-full max-w-lg mx-4">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <GitBranch size={18} /> Add Git Repository
+                </h3>
+                <button onClick={() => setShowAddGitModal(false)} className="text-gray-400 hover:text-white">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">Git repository URL</label>
+                  <input
+                    value={gitAddonForm.url}
+                    onChange={(e) => setGitAddonForm({ ...gitAddonForm, url: e.target.value })}
+                    className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-white text-sm"
+                    placeholder="https://github.com/org/repo.git"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">Branch</label>
+                  <input
+                    value={gitAddonForm.branch}
+                    onChange={(e) => setGitAddonForm({ ...gitAddonForm, branch: e.target.value })}
+                    className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-white text-sm"
+                    placeholder={instance?.version || "17.0"}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Copy method</label>
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="copy_method"
+                        checked={gitAddonForm.copy_method === "all"}
+                        onChange={() => setGitAddonForm({ ...gitAddonForm, copy_method: "all" })}
+                        className="accent-[var(--accent)]"
+                      />
+                      <span className="text-sm text-white">All addons (recommended)</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="copy_method"
+                        checked={gitAddonForm.copy_method === "specific"}
+                        onChange={() => setGitAddonForm({ ...gitAddonForm, copy_method: "specific" })}
+                        className="accent-[var(--accent)]"
+                      />
+                      <span className="text-sm text-white">Specific addons</span>
+                    </label>
+                  </div>
+                </div>
+
+                {gitAddonForm.copy_method === "specific" && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1">Module names</label>
+                    <input
+                      value={gitAddonForm.specific_addons}
+                      onChange={(e) => setGitAddonForm({ ...gitAddonForm, specific_addons: e.target.value })}
+                      className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-white text-sm"
+                      placeholder="module_a, module_b, module_c"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Comma-separated list of module technical names</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={() => setShowAddGitModal(false)}
+                  className="px-4 py-2 text-gray-400 hover:text-white text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!gitAddonForm.url.trim()) return;
+                    setGitAddonAdding(true);
+                    try {
+                      const payload: { url: string; branch: string; copy_method?: string; specific_addons?: string[] } = {
+                        url: gitAddonForm.url.trim(),
+                        branch: gitAddonForm.branch.trim() || instance?.version || "17.0",
+                      };
+                      if (gitAddonForm.copy_method === "specific" && gitAddonForm.specific_addons.trim()) {
+                        payload.copy_method = "specific";
+                        payload.specific_addons = gitAddonForm.specific_addons.split(",").map(s => s.trim()).filter(Boolean);
+                      }
+                      await instancesApi.addGitAddon(instanceId, payload);
+                      setShowAddGitModal(false);
+                      loadAddons();
+                    } catch (e: any) {
+                      alert(e.message || "Failed to add git addon");
+                    } finally {
+                      setGitAddonAdding(false);
+                    }
+                  }}
+                  disabled={!gitAddonForm.url.trim() || gitAddonAdding}
+                  className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white rounded-lg text-sm flex items-center gap-2 disabled:opacity-50"
+                >
+                  {gitAddonAdding ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                  Add Module
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* OCA Catalog Modal */}
+        {showOcaModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+            onClick={(e) => { if (e.target === e.currentTarget) setShowOcaModal(false); }}
+            onKeyDown={(e) => { if (e.key === "Escape") setShowOcaModal(false); }}
+          >
+            <div className="bg-[var(--card)] border border-white/10 rounded-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <Library size={18} /> OCA Repository Catalog
+                </h3>
+                <button onClick={() => setShowOcaModal(false)} className="text-gray-400 hover:text-white">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="relative mb-4">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
+                <input
+                  value={ocaSearch}
+                  onChange={(e) => setOcaSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 bg-black/30 border border-white/10 rounded-lg text-white text-sm"
+                  placeholder="Search OCA repositories..."
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
+                {ocaCatalog.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Loader2 size={20} className="mx-auto animate-spin text-[var(--muted)] mb-2" />
+                    <p className="text-sm text-[var(--muted)]">Loading catalog...</p>
+                  </div>
+                ) : (
+                  (() => {
+                    const filtered = ocaCatalog.filter(
+                      (repo) =>
+                        !ocaSearch ||
+                        repo.name?.toLowerCase().includes(ocaSearch.toLowerCase()) ||
+                        repo.description?.toLowerCase().includes(ocaSearch.toLowerCase()) ||
+                        repo.category?.toLowerCase().includes(ocaSearch.toLowerCase())
+                    );
+                    // Group by category
+                    const grouped: Record<string, typeof filtered> = {};
+                    filtered.forEach((repo) => {
+                      const cat = repo.category || "Other";
+                      if (!grouped[cat]) grouped[cat] = [];
+                      grouped[cat].push(repo);
+                    });
+                    const categories = Object.keys(grouped).sort();
+
+                    if (filtered.length === 0) {
+                      return <p className="text-sm text-[var(--muted)] text-center py-4">No repositories match your search.</p>;
+                    }
+
+                    return categories.map((cat) => (
+                      <div key={cat}>
+                        <h4 className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wider mb-1.5 mt-3 first:mt-0">{cat}</h4>
+                        {grouped[cat].map((repo: any, ri: number) => (
+                          <div key={ri} className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-white/5 hover:bg-white/5 transition-colors">
+                            <div className="flex-1 min-w-0 mr-3">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium text-white">{repo.name}</span>
+                                {repo.url && (
+                                  <a href={repo.url.replace(/\.git$/, "")} target="_blank" rel="noopener noreferrer" className="text-[var(--muted)] hover:text-[var(--accent)]">
+                                    <ExternalLink size={11} />
+                                  </a>
+                                )}
+                              </div>
+                              {repo.description && (
+                                <p className="text-xs text-[var(--muted)] mt-0.5 truncate">{repo.description}</p>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => {
+                                setShowOcaModal(false);
+                                setGitAddonForm({
+                                  url: repo.url || `https://github.com/OCA/${repo.name}.git`,
+                                  branch: instance?.version || "17.0",
+                                  copy_method: "all",
+                                  specific_addons: "",
+                                });
+                                setShowAddGitModal(true);
+                              }}
+                              className="px-3 py-1 text-xs rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors shrink-0 flex items-center gap-1"
+                            >
+                              <Plus size={12} /> Add
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ));
+                  })()
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Repository Settings Modal */}
+        {showAddonSettingsModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+            onClick={(e) => { if (e.target === e.currentTarget) setShowAddonSettingsModal(null); }}
+            onKeyDown={(e) => { if (e.key === "Escape") setShowAddonSettingsModal(null); }}
+          >
+            <div className="bg-[var(--card)] border border-white/10 rounded-2xl p-6 w-full max-w-lg mx-4">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <Settings2 size={18} /> Repository Settings
+                </h3>
+                <button onClick={() => setShowAddonSettingsModal(null)} className="text-gray-400 hover:text-white">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <p className="text-sm text-[var(--muted)] mb-4">
+                {showAddonSettingsModal.name || showAddonSettingsModal.url?.replace(/\.git$/, "").split("/").slice(-2).join("/")}
+              </p>
+
+              <div className="space-y-1">
+                <SettingToggle
+                  label="Auto update when pushed"
+                  description="Automatically pull changes when a webhook is received"
+                  checked={showAddonSettingsModal.settings?.auto_update ?? false}
+                  onChange={async (v) => {
+                    try {
+                      await instancesApi.updateAddonSettings(instanceId, showAddonSettingsModal.id, { auto_update: v });
+                      setShowAddonSettingsModal({ ...showAddonSettingsModal, settings: { ...showAddonSettingsModal.settings, auto_update: v } });
+                      loadAddons();
+                    } catch (e: any) { alert(e.message || "Failed to save setting"); }
+                  }}
+                />
+                <SettingToggle
+                  label="Install Python requirements"
+                  description="Run pip install -r requirements.txt on update"
+                  checked={showAddonSettingsModal.settings?.install_requirements ?? false}
+                  onChange={async (v) => {
+                    try {
+                      await instancesApi.updateAddonSettings(instanceId, showAddonSettingsModal.id, { install_requirements: v });
+                      setShowAddonSettingsModal({ ...showAddonSettingsModal, settings: { ...showAddonSettingsModal.settings, install_requirements: v } });
+                      loadAddons();
+                    } catch (e: any) { alert(e.message || "Failed to save setting"); }
+                  }}
+                />
+                <SettingToggle
+                  label="Auto upgrade module(s)"
+                  description="Automatically upgrade Odoo modules after pulling changes"
+                  checked={showAddonSettingsModal.settings?.auto_upgrade ?? false}
+                  onChange={async (v) => {
+                    try {
+                      await instancesApi.updateAddonSettings(instanceId, showAddonSettingsModal.id, { auto_upgrade: v });
+                      setShowAddonSettingsModal({ ...showAddonSettingsModal, settings: { ...showAddonSettingsModal.settings, auto_upgrade: v } });
+                      loadAddons();
+                    } catch (e: any) { alert(e.message || "Failed to save setting"); }
+                  }}
+                />
+              </div>
+
+              <div className="flex justify-end mt-6">
+                <button
+                  onClick={() => setShowAddonSettingsModal(null)}
+                  className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white rounded-lg text-sm"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Update Addon Modal */}
+        {showUpdateModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+            onClick={(e) => { if (e.target === e.currentTarget) setShowUpdateModal(null); }}
+            onKeyDown={(e) => { if (e.key === "Escape") setShowUpdateModal(null); }}
+          >
+            <div className="bg-[var(--card)] border border-white/10 rounded-2xl p-6 w-full max-w-lg mx-4">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <RefreshCw size={18} /> Update Addon
+                </h3>
+                <button onClick={() => setShowUpdateModal(null)} className="text-gray-400 hover:text-white">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-[var(--muted)]">Branch</span>
+                  <span className="text-sm font-mono text-white flex items-center gap-1">
+                    <GitBranch size={12} /> {showUpdateModal.addon?.branch}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-[var(--muted)]">Previous commit</span>
+                  <span className="text-xs font-mono px-2 py-1 rounded bg-white/5 text-[var(--muted)]">
+                    {showUpdateModal.result?.old_commit || showUpdateModal.addon?.commit || "\u2014"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-[var(--muted)]">New commit</span>
+                  <span className="text-xs font-mono px-2 py-1 rounded bg-white/5 text-[var(--muted)]">
+                    {showUpdateModal.result?.new_commit || showUpdateModal.result?.commit || "\u2014"}
+                  </span>
+                </div>
+
+                {showUpdateModal.result?.already_up_to_date && (
+                  <div className="mt-2 p-3 rounded-lg bg-[var(--success)]/10 border border-[var(--success)]/20 flex items-center gap-2">
+                    <CheckCircle size={14} className="text-[var(--success)]" />
+                    <span className="text-sm text-[var(--success)]">Already up to date</span>
+                  </div>
+                )}
+
+                {!showUpdateModal.result?.already_up_to_date && showUpdateModal.addon?.url?.includes("github.com") && showUpdateModal.result?.old_commit && showUpdateModal.result?.new_commit && (
+                  <a
+                    href={`${showUpdateModal.addon.url.replace(/\.git$/, "")}/compare/${showUpdateModal.result.old_commit}...${showUpdateModal.result.new_commit}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-sm text-[var(--accent)] hover:underline mt-1"
+                  >
+                    <ExternalLink size={12} /> Show differences on Github
+                  </a>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={() => setShowUpdateModal(null)}
+                  className="px-4 py-2 text-gray-400 hover:text-white text-sm"
+                >
+                  {showUpdateModal.result?.already_up_to_date ? "Close" : "Cancel"}
+                </button>
+                {!showUpdateModal.result?.already_up_to_date && (
+                  <button
+                    onClick={async () => {
+                      setShowUpdateModal(null);
+                      try {
+                        await instancesApi.restart(instanceId);
+                        await loadInstance();
+                        loadAddons();
+                      } catch (e: any) {
+                        alert(e.message || "Failed to restart instance");
+                      }
+                    }}
+                    className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white rounded-lg text-sm flex items-center gap-2"
+                  >
+                    <RefreshCw size={14} /> Update Module
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Domain Settings Modal */}
         {showDomainModal && (

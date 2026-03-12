@@ -82,14 +82,27 @@ class OdooPlugin(CMSPlugin):
             "--proxy-mode",
         ]
 
-        # Enterprise addons path must come BEFORE community addons (Odoo requirement)
+        # Build addons path: enterprise (first) + git addons + community
+        git_addons = config.get("git_addons", [])
+        installed_git_addons = [
+            ga for ga in git_addons if ga.get("status") == "installed"
+        ]
+        git_addon_paths = [f"/mnt/extra-addons/{ga['id']}" for ga in installed_git_addons]
+
+        addons_path_parts = []
         if enterprise:
-            cmd_parts.append("--addons-path=/mnt/enterprise-addons,/mnt/extra-addons")
+            addons_path_parts.append("/mnt/enterprise-addons")
+        addons_path_parts.extend(git_addon_paths)
+        addons_path_parts.append("/mnt/extra-addons")
+
+        if enterprise or installed_git_addons:
+            addons_path_str = ",".join(addons_path_parts)
+            cmd_parts.append(f"--addons-path={addons_path_str}")
 
         # Odoo config file (admin_passwd can only be set via conf in Odoo 17+)
         addons_path_conf = ""
-        if enterprise:
-            addons_path_conf = "addons_path = /mnt/enterprise-addons,/mnt/extra-addons\n"
+        if enterprise or installed_git_addons:
+            addons_path_conf = f"addons_path = {','.join(addons_path_parts)}\n"
 
         odoo_conf = (
             f"[options]\n"
@@ -127,6 +140,13 @@ class OdooPlugin(CMSPlugin):
 
         if enterprise:
             lines.append(f"      - /opt/crx-cloud/enterprise/{version}/addons:/mnt/enterprise-addons:ro")
+
+        # Git addon volume mounts
+        for ga in installed_git_addons:
+            ga_id = ga["id"]
+            lines.append(
+                f"      - /opt/crx-cloud/instances/{prefix}/addons/{ga_id}:/mnt/extra-addons/{ga_id}:ro"
+            )
 
         if not use_external_db:
             lines += [
@@ -652,6 +672,216 @@ echo "ENTERPRISE_ADDONS_OK count=$ADDON_COUNT"
         except Exception as e:
             logger.error(f"Failed to sync enterprise addons for v{version}: {e}")
             return False
+
+    # ------------------------------------------------------------------
+    # Git addon management
+    # ------------------------------------------------------------------
+
+    async def clone_addon(self, instance: CMSInstance, addon_id: str, url: str, branch: str) -> dict:
+        """Clone a git addon repo into the instance's addon directory."""
+        prefix = instance.config.get("prefix", "")
+        endpoint = instance.config.get("endpoint", "")
+        ssh_meta = instance.config.get("ssh_metadata", {})
+        server = self._server_info(instance.server_id, endpoint, ssh_meta)
+
+        target_dir = f"/opt/crx-cloud/instances/{prefix}/addons/{addon_id}"
+        clone_cmd = (
+            f"mkdir -p /opt/crx-cloud/instances/{prefix}/addons && "
+            f"git clone --branch {branch} --single-branch --depth 1 {url} {target_dir}"
+        )
+        await self.vm_driver._ssh_exec(server, clone_cmd, timeout=300)
+
+        # Get HEAD commit sha
+        commit_result = await self.vm_driver._ssh_exec(
+            server, f"git -C {target_dir} rev-parse HEAD"
+        )
+        commit = commit_result.strip()
+
+        # Scan modules
+        modules = await self.scan_addon_modules(instance, addon_id)
+
+        logger.info(f"Cloned {url}@{branch} -> {target_dir} (commit: {commit[:8]}, {len(modules)} modules)")
+        return {"commit": commit, "modules": modules}
+
+    async def pull_addon(self, instance: CMSInstance, addon_id: str, branch: str) -> dict:
+        """Pull latest changes for a git addon."""
+        prefix = instance.config.get("prefix", "")
+        endpoint = instance.config.get("endpoint", "")
+        ssh_meta = instance.config.get("ssh_metadata", {})
+        server = self._server_info(instance.server_id, endpoint, ssh_meta)
+
+        addon_dir = f"/opt/crx-cloud/instances/{prefix}/addons/{addon_id}"
+
+        # Get current commit before pull
+        old_result = await self.vm_driver._ssh_exec(
+            server, f"git -C {addon_dir} rev-parse HEAD"
+        )
+        previous_commit = old_result.strip()
+
+        # Pull latest
+        await self.vm_driver._ssh_exec(
+            server, f"git -C {addon_dir} pull origin {branch}", timeout=120
+        )
+
+        # Get new commit
+        new_result = await self.vm_driver._ssh_exec(
+            server, f"git -C {addon_dir} rev-parse HEAD"
+        )
+        new_commit = new_result.strip()
+
+        changed = previous_commit != new_commit
+        logger.info(f"Pulled addon {addon_id}: {previous_commit[:8]}..{new_commit[:8]} (changed={changed})")
+
+        return {
+            "previous_commit": previous_commit,
+            "new_commit": new_commit,
+            "changed": changed,
+        }
+
+    async def remove_addon(self, instance: CMSInstance, addon_id: str) -> bool:
+        """Remove an addon directory from the instance."""
+        prefix = instance.config.get("prefix", "")
+        endpoint = instance.config.get("endpoint", "")
+        ssh_meta = instance.config.get("ssh_metadata", {})
+        server = self._server_info(instance.server_id, endpoint, ssh_meta)
+
+        addon_dir = f"/opt/crx-cloud/instances/{prefix}/addons/{addon_id}"
+        await self.vm_driver._ssh_exec(server, f"rm -rf {addon_dir}")
+        logger.info(f"Removed addon dir: {addon_dir}")
+        return True
+
+    async def scan_addon_modules(self, instance: CMSInstance, addon_id: str) -> list[dict]:
+        """Scan __manifest__.py files in addon directory and return module info."""
+        prefix = instance.config.get("prefix", "")
+        endpoint = instance.config.get("endpoint", "")
+        ssh_meta = instance.config.get("ssh_metadata", {})
+        server = self._server_info(instance.server_id, endpoint, ssh_meta)
+
+        addon_dir = f"/opt/crx-cloud/instances/{prefix}/addons/{addon_id}"
+
+        scan_script = (
+            f"find {addon_dir} -name '__manifest__.py' -maxdepth 2 | while read f; do\n"
+            f"    dirname=$(basename $(dirname $f))\n"
+            f"    echo \"MODULE:$dirname\"\n"
+            f"    python3 -c \"\n"
+            f"import ast, sys\n"
+            f"data = ast.literal_eval(open('$f').read())\n"
+            f"print('NAME:' + str(data.get('name', '')))\n"
+            f"print('VERSION:' + str(data.get('version', '')))\n"
+            f"print('DEPENDS:' + ','.join(data.get('depends', [])))\n"
+            f"print('SUMMARY:' + str(data.get('summary', '')))\n"
+            f"print('INSTALLABLE:' + str(data.get('installable', True)))\n"
+            f"\" 2>/dev/null\n"
+            f"done"
+        )
+        result = await self.vm_driver._ssh_exec(server, scan_script, timeout=60)
+
+        modules = []
+        current_module: dict = {}
+
+        for line in result.strip().split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("MODULE:"):
+                if current_module:
+                    modules.append(current_module)
+                current_module = {"technical_name": line[7:]}
+            elif line.startswith("NAME:") and current_module:
+                current_module["name"] = line[5:]
+            elif line.startswith("VERSION:") and current_module:
+                current_module["version"] = line[8:]
+            elif line.startswith("DEPENDS:") and current_module:
+                deps = line[8:]
+                current_module["depends"] = deps.split(",") if deps else []
+            elif line.startswith("SUMMARY:") and current_module:
+                current_module["summary"] = line[8:]
+            elif line.startswith("INSTALLABLE:") and current_module:
+                current_module["installable"] = line[12:].strip() != "False"
+
+        if current_module:
+            modules.append(current_module)
+
+        logger.info(f"Scanned {len(modules)} modules in addon {addon_id}")
+        return modules
+
+    async def install_addon_requirements(self, instance: CMSInstance, addon_id: str) -> bool:
+        """Install Python requirements from addon's requirements.txt into odoo container."""
+        prefix = instance.config.get("prefix", "")
+        endpoint = instance.config.get("endpoint", "")
+        ssh_meta = instance.config.get("ssh_metadata", {})
+        server = self._server_info(instance.server_id, endpoint, ssh_meta)
+
+        addon_dir = f"/opt/crx-cloud/instances/{prefix}/addons/{addon_id}"
+        container = f"{prefix}-odoo"
+
+        # Check if requirements.txt exists
+        check = await self.vm_driver._ssh_exec(
+            server, f"test -f {addon_dir}/requirements.txt && echo EXISTS || echo MISSING"
+        )
+        if "MISSING" in check:
+            logger.info(f"No requirements.txt in addon {addon_id}")
+            return True
+
+        # Install inside the odoo container
+        await self.vm_driver._ssh_exec(
+            server,
+            f"docker exec {container} pip3 install -r /mnt/extra-addons/{addon_id}/requirements.txt",
+            timeout=300,
+        )
+        logger.info(f"Installed requirements for addon {addon_id}")
+        return True
+
+    async def update_module_list(self, instance: CMSInstance) -> bool:
+        """Trigger Odoo to refresh its module list via JSONRPC."""
+        import json as _json
+
+        port = instance.config.get("port", 8069)
+        db_name = instance.config.get("db_name", instance.name)
+        admin_password = instance.config.get("admin_password", "admin")
+        endpoint = instance.config.get("endpoint", "")
+        ssh_meta = instance.config.get("ssh_metadata", {})
+        server = self._server_info(instance.server_id, endpoint, ssh_meta)
+
+        # Authenticate
+        auth_payload = _json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "call",
+            "params": {"service": "common", "method": "authenticate",
+                       "args": [db_name, "admin", admin_password, {}]}
+        })
+        auth_result = await self.vm_driver._ssh_exec(
+            server,
+            f"curl -s -X POST http://localhost:{port}/jsonrpc "
+            f"-H 'Content-Type: application/json' "
+            f"-d '{auth_payload}'"
+        )
+        try:
+            uid = _json.loads(auth_result).get("result")
+        except Exception:
+            logger.warning(f"Cannot parse auth response for module list update")
+            return False
+
+        if not uid:
+            logger.warning(f"Cannot authenticate for module list update")
+            return False
+
+        # Update module list
+        update_payload = _json.dumps({
+            "jsonrpc": "2.0", "id": 2, "method": "call",
+            "params": {
+                "service": "object", "method": "execute_kw",
+                "args": [db_name, uid, admin_password, "ir.module.module", "update_list", []]
+            }
+        })
+        await self.vm_driver._ssh_exec(
+            server,
+            f"curl -s -X POST http://localhost:{port}/jsonrpc "
+            f"-H 'Content-Type: application/json' "
+            f"-d '{update_payload}' --max-time 120",
+            timeout=120
+        )
+        logger.info(f"Module list updated for {instance.name}")
+        return True
 
     async def enable_enterprise(self, instance: CMSInstance) -> bool:
         """Enable enterprise on a running instance.

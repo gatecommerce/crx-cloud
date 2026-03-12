@@ -561,56 +561,8 @@ async def update_domain(
     return _to_response(inst)
 
 
-@router.get("/{instance_id}/addons")
-async def list_addons(
-    instance_id: str,
-    db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user),
-):
-    """List addons installed on the instance (enterprise, custom, etc.)."""
-    result = await db.execute(
-        select(Instance).where(Instance.id == instance_id, Instance.owner_id == user["telegram_id"])
-    )
-    inst = result.scalar_one_or_none()
-    if not inst:
-        raise HTTPException(status_code=404, detail="Instance not found")
-
-    addons = []
-    config = inst.config or {}
-
-    # Enterprise addon
-    if config.get("enterprise"):
-        is_upgrading = inst.status == "upgrading"
-
-        # Get installed revision date from instance config
-        installed_revision = config.get("enterprise_revision_date", "")
-
-        # Get available revision date from global enterprise package
-        available_revision = ""
-        try:
-            meta_path = Path(__file__).resolve().parents[2] / "data" / "enterprise" / inst.version / "meta.json"
-            if meta_path.exists():
-                import json as _json
-                meta = _json.loads(meta_path.read_text())
-                available_revision = meta.get("revision_date", "")
-        except Exception:
-            pass
-
-        update_available = bool(available_revision and installed_revision and available_revision > installed_revision)
-
-        addons.append({
-            "type": "file",
-            "name": "Odoo Enterprise",
-            "branch": inst.version,
-            "status": "installing" if is_upgrading else "installed",
-            "can_update": not is_upgrading,
-            "can_delete": not is_upgrading,
-            "revision_date": installed_revision,
-            "available_revision_date": available_revision,
-            "update_available": update_available,
-        })
-
-    return addons
+## NOTE: list_addons endpoint moved to api/routes/addons.py
+## It now returns both enterprise (file) + git addons.
 
 
 async def _bg_update_enterprise_addons(instance_id: str, server_id: str):

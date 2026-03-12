@@ -87,6 +87,23 @@ export const instancesApi = {
     apiFetch<any>(`/api/v1/instances/${id}/addons/enterprise/update`, { method: "POST" }),
   removeEnterpriseAddons: (id: string) =>
     apiFetch<any>(`/api/v1/instances/${id}/addons/enterprise`, { method: "DELETE" }),
+  // Git Addons
+  addGitAddon: (id: string, data: { url: string; branch: string; copy_method?: string; specific_addons?: string[] }) =>
+    apiFetch<any>(`/api/v1/instances/${id}/addons/git`, { method: "POST", body: JSON.stringify(data) }),
+  updateAddonSettings: (id: string, addonId: string, data: Record<string, any>) =>
+    apiFetch<any>(`/api/v1/instances/${id}/addons/git/${addonId}/settings`, { method: "PATCH", body: JSON.stringify(data) }),
+  updateGitAddon: (id: string, addonId: string) =>
+    apiFetch<any>(`/api/v1/instances/${id}/addons/git/${addonId}/update`, { method: "POST" }),
+  removeGitAddon: (id: string, addonId: string) =>
+    apiFetch<any>(`/api/v1/instances/${id}/addons/git/${addonId}`, { method: "DELETE" }),
+  getAddonModules: (id: string, addonId: string) =>
+    apiFetch<any>(`/api/v1/instances/${id}/addons/git/${addonId}/modules`),
+  checkConflicts: (id: string) =>
+    apiFetch<any>(`/api/v1/instances/${id}/addons/check-conflicts`),
+  checkCompatibility: (id: string) =>
+    apiFetch<any>(`/api/v1/instances/${id}/addons/check-compatibility`),
+  getOcaCatalog: () =>
+    apiFetch<any[]>(`/api/v1/instances/oca-catalog`),
 };
 
 // Backup API
