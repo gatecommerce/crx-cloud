@@ -29,14 +29,13 @@ def _ensure_keypair() -> None:
     logger.info("Generating CRX Cloud SSH keypair...")
     key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
 
-    # Write private key (PEM, no passphrase)
-    _PRIVATE_KEY.write_bytes(
-        key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.OpenSSH,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
+    # Write private key (PEM, no passphrase) — force LF line endings
+    key_bytes = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.OpenSSH,
+        encryption_algorithm=serialization.NoEncryption(),
     )
+    _PRIVATE_KEY.write_bytes(key_bytes.replace(b"\r\n", b"\n"))
     os.chmod(str(_PRIVATE_KEY), 0o600)
 
     # Write public key

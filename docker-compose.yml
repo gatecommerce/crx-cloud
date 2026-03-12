@@ -4,8 +4,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      args:
-        - API_URL_INTERNAL=http://backend:8080
+      target: builder
+    command: ["npx", "next", "dev"]
     ports:
       - "3001:3000"
     environment:
@@ -31,6 +31,8 @@ services:
       - DIGITALOCEAN_API_TOKEN=${DIGITALOCEAN_API_TOKEN:-}
       - VULTR_API_KEY=${VULTR_API_KEY:-}
       - LINODE_API_TOKEN=${LINODE_API_TOKEN:-}
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN:-}
+      - CLOUDFLARE_ZONE_ID=${CLOUDFLARE_ZONE_ID:-}
     volumes:
       - ./backend:/app
     depends_on:

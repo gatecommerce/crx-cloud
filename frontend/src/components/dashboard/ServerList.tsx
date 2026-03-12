@@ -9,8 +9,19 @@ import {
   Zap, Globe, Shield, CloudUpload, Link, Clock, Activity,
   Star, ChevronDown, ChevronUp, Tag, ShieldCheck, RotateCw, AlertTriangle,
   ShieldAlert, ShieldX, Scan, Bug, Skull, UserX, Terminal,
-  Network, Key, Sparkles,
+  Network, Key, Sparkles, Search, LayoutList, LayoutGrid,
 } from "lucide-react";
+
+interface ServerSpecs {
+  cpu_cores: number;
+  cpu_model: string;
+  ram_mb: number;
+  disk_gb: number;
+  disk_used_gb: number;
+  os: string;
+  kernel: string;
+  arch: string;
+}
 
 interface ServerData {
   id: string;
@@ -21,6 +32,9 @@ interface ServerData {
   endpoint: string;
   region?: string;
   instances_count?: number;
+  meta?: Record<string, any>;
+  specs?: ServerSpecs | null;
+  provider_plan?: string | null;
 }
 
 interface Metrics {
@@ -103,6 +117,9 @@ export function ServerList() {
   const [showWizard, setShowWizard] = useState(false);
   const [expandedServer, setExpandedServer] = useState<string | null>(null);
   const [securityData, setSecurityData] = useState<Record<string, any>>({});
+  const [deleteDialog, setDeleteDialog] = useState<{ id: string; name: string; provider?: string; hasCloud: boolean } | null>(null);
+  const [viewMode, setViewMode] = useState<"list" | "grid">("grid");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const loadServers = useCallback(async () => {
     try {
@@ -128,14 +145,31 @@ export function ServerList() {
     return () => clearInterval(interval);
   }, [loadServers]);
 
-  async function handleDelete(id: string, name: string) {
-    if (!confirm(`Remove server "${name}" and all its instances?`)) return;
+  const filteredServers = useMemo(() => {
+    if (!searchQuery) return servers;
+    const q = searchQuery.toLowerCase();
+    return servers.filter(
+      (s) =>
+        s.name.toLowerCase().includes(q) ||
+        s.endpoint.toLowerCase().includes(q) ||
+        s.provider?.toLowerCase().includes(q)
+    );
+  }, [servers, searchQuery]);
+
+  function handleDeleteClick(server: ServerData) {
+    const hasCloud = !!(server.meta?.provider_id && server.provider);
+    setDeleteDialog({ id: server.id, name: server.name, provider: server.provider, hasCloud });
+  }
+
+  async function handleDeleteConfirm(destroyCloud: boolean) {
+    if (!deleteDialog) return;
     try {
-      await serversApi.remove(id);
-      setServers((prev) => prev.filter((s) => s.id !== id));
+      await serversApi.remove(deleteDialog.id, destroyCloud);
+      setServers((prev) => prev.filter((s) => s.id !== deleteDialog.id));
     } catch (err: any) {
       alert(err.message);
     }
+    setDeleteDialog(null);
   }
 
   if (loading) {
@@ -150,7 +184,32 @@ export function ServerList() {
     <>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Servers</h1>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {/* Search */}
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search servers..."
+              className="pl-8 pr-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm w-44 focus:outline-none focus:border-[var(--accent)] focus:w-56 transition-all"
+            />
+          </div>
+          {/* View toggle */}
+          <div className="flex border border-[var(--border)] rounded-lg overflow-hidden">
+            <button
+              onClick={() => setViewMode("list")}
+              className={`p-2 transition-colors ${viewMode === "list" ? "bg-[var(--accent)] text-white" : "text-[var(--muted)] hover:text-[var(--foreground)]"}`}
+            >
+              <LayoutList size={16} />
+            </button>
+            <button
+              onClick={() => setViewMode("grid")}
+              className={`p-2 transition-colors ${viewMode === "grid" ? "bg-[var(--accent)] text-white" : "text-[var(--muted)] hover:text-[var(--foreground)]"}`}
+            >
+              <LayoutGrid size={16} />
+            </button>
+          </div>
           <button
             onClick={loadServers}
             className="p-2 text-[var(--muted)] hover:text-[var(--foreground)] rounded-lg hover:bg-[var(--card-hover)] transition-colors"
@@ -168,110 +227,243 @@ export function ServerList() {
 
       {servers.length === 0 ? (
         <EmptyState onConnect={() => setShowWizard(true)} />
-      ) : (
-        <div className="grid gap-4">
-          {servers.map((server) => {
-            const m = metrics[server.id];
-            const prov = providerLogos[server.provider] || providerLogos.custom;
-            const isExpanded = expandedServer === server.id;
-            const sec = securityData[server.id];
-            return (
-              <div
-                key={server.id}
-                className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 hover:border-[var(--accent)]/30 transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-2.5 h-2.5 rounded-full ${statusColors[server.status] || "bg-[var(--muted)]"}`} />
-                    <h3 className="font-semibold">{server.name}</h3>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--border)] text-[var(--muted)]">
-                      {server.server_type === "kubernetes" ? "K8s" : "VM"}
-                    </span>
-                    {server.status === "online" ? (
-                      <Wifi size={14} className="text-[var(--success)]" />
-                    ) : server.status === "provisioning" ? (
-                      <Loader2 size={14} className="text-[var(--warning)] animate-spin" />
-                    ) : (
-                      <WifiOff size={14} className="text-[var(--danger)]" />
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-[var(--muted)] font-mono">{server.endpoint}</span>
-                    <span className="text-xs px-2 py-0.5 rounded font-medium" style={{ color: prov.color }}>
-                      {prov.label}
-                    </span>
-                    {server.instances_count ? (
-                      <span className="text-xs text-[var(--muted)]">
-                        {server.instances_count} instance{server.instances_count > 1 ? "s" : ""}
-                      </span>
-                    ) : null}
-                    {/* Security score badge */}
-                    {server.status === "online" && (
+      ) : viewMode === "list" ? (
+        /* ─── List View (table) ──────────────────────────────── */
+        <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-[var(--border)]">
+                <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">Server</th>
+                <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">IP</th>
+                <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">Specs</th>
+                <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">Status</th>
+                <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">Instances</th>
+                <th className="text-right text-xs font-normal text-[var(--muted)] px-5 py-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredServers.map((server) => {
+                const prov = providerLogos[server.provider] || providerLogos.custom;
+                return (
+                  <tr key={server.id} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--card-hover)] transition-colors">
+                    <td className="px-5 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-xs" style={{ backgroundColor: prov.color }}>
+                          {prov.short}
+                        </div>
+                        <div>
+                          <div className="text-sm font-medium">{server.name}</div>
+                          <div className="text-xs text-[var(--muted)]">
+                            {server.server_type === "kubernetes" ? "K8s" : "VM"} &middot; {prov.label}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-5 py-4 text-sm font-mono text-[var(--muted)]">{server.endpoint}</td>
+                    <td className="px-5 py-4">
+                      {server.specs ? (
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-3 text-xs">
+                            <span className="flex items-center gap-1 text-[var(--foreground)]">
+                              <Cpu size={11} className="text-[var(--accent)]" />
+                              {server.specs.cpu_cores} vCPU
+                            </span>
+                            <span className="flex items-center gap-1 text-[var(--foreground)]">
+                              <MemoryStick size={11} className="text-[var(--accent)]" />
+                              {server.specs.ram_mb >= 1024 ? `${(server.specs.ram_mb / 1024).toFixed(server.specs.ram_mb % 1024 === 0 ? 0 : 1)} GB` : `${server.specs.ram_mb} MB`}
+                            </span>
+                            <span className="flex items-center gap-1 text-[var(--foreground)]">
+                              <HardDrive size={11} className="text-[var(--accent)]" />
+                              {server.specs.disk_gb} GB
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-[var(--muted)] truncate max-w-[250px]">
+                            {server.specs.os}{server.region ? ` · ${server.region}` : ""}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-[var(--muted)]">{server.region || "—"}</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2.5 h-2.5 rounded-full ${statusColors[server.status] || "bg-[var(--muted)]"}`} />
+                        <span className="text-sm capitalize">
+                          {server.status === "online" ? "Connected" : server.status}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-4 text-sm text-[var(--muted)]">
+                      {server.instances_count || 0} instance{(server.instances_count || 0) !== 1 ? "s" : ""}
+                    </td>
+                    <td className="px-5 py-4 text-right">
                       <button
-                        onClick={() => {
-                          if (isExpanded) {
-                            setExpandedServer(null);
-                          } else {
-                            setExpandedServer(server.id);
-                            if (!sec) {
-                              serversApi.security(server.id).then((d) => {
-                                setSecurityData((prev) => ({ ...prev, [server.id]: d }));
-                              }).catch(() => {});
-                            }
-                          }
-                        }}
-                        className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full transition-colors hover:bg-[var(--border)]"
-                        title="Security audit"
+                        onClick={() => handleDeleteClick(server)}
+                        className="text-[var(--muted)] hover:text-[var(--danger)] transition-colors p-1"
                       >
-                        <ShieldCheck size={12} className={sec?.security_score >= 80 ? "text-[var(--success)]" : sec?.security_score >= 50 ? "text-[var(--warning)]" : "text-[var(--muted)]"} />
-                        {sec && <span className={sec.security_score >= 80 ? "text-[var(--success)]" : sec.security_score >= 50 ? "text-[var(--warning)]" : "text-[var(--danger)]"}>{sec.security_score}</span>}
-                        {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                        <Trash2 size={14} />
                       </button>
-                    )}
-                    <button
-                      onClick={() => handleDelete(server.id, server.name)}
-                      className="text-[var(--muted)] hover:text-[var(--danger)] transition-colors"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-
-                {server.status === "online" && m && (
-                  <div className="flex gap-6 mt-4">
-                    <MetricBar label="CPU" value={m.cpu_percent} icon={Cpu} />
-                    <MetricBar label="RAM" value={m.ram_percent} icon={MemoryStick} />
-                    <MetricBar label="Disk" value={m.disk_percent} icon={HardDrive} />
-                  </div>
-                )}
-
-                {server.status === "provisioning" && (
-                  <div className="mt-3 text-xs text-[var(--warning)] flex items-center gap-2">
-                    <Loader2 size={12} className="animate-spin" />
-                    Setting up server environment (Docker, firewall, security hardening)...
-                  </div>
-                )}
-
-                {/* Expanded security panel */}
-                {isExpanded && sec && (
-                  <SecurityPanel server={server} data={sec} onReboot={() => {
-                    if (confirm(`Reboot server "${server.name}"? All instances will restart.`)) {
-                      serversApi.reboot(server.id).then(() => {
-                        alert("Reboot scheduled in 1 minute.");
-                      }).catch((e: any) => alert(e.message));
-                    }
-                  }} />
-                )}
-                {isExpanded && !sec && (
-                  <div className="mt-4 flex items-center justify-center py-4">
-                    <Loader2 size={16} className="animate-spin text-[var(--accent)]" />
-                    <span className="ml-2 text-xs text-[var(--muted)]">Running security audit...</span>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div className="text-right text-xs text-[var(--muted)] px-5 py-3 border-t border-[var(--border)]">
+            Showing <span className="font-semibold text-[var(--accent)]">{filteredServers.length}</span> Server{filteredServers.length !== 1 ? "s" : ""} of <span className="font-semibold text-[var(--accent)]">{servers.length}</span> Server{servers.length !== 1 ? "s" : ""}.
+          </div>
         </div>
+      ) : (
+        /* ─── Grid View (cards with resource bars) ───────────── */
+        <>
+          <div className="grid gap-4 md:grid-cols-2">
+            {filteredServers.map((server) => {
+              const m = metrics[server.id];
+              const prov = providerLogos[server.provider] || providerLogos.custom;
+              const isExpanded = expandedServer === server.id;
+              const sec = securityData[server.id];
+              return (
+                <div
+                  key={server.id}
+                  className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 hover:border-[var(--accent)]/30 transition-colors"
+                >
+                  {/* Header */}
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-xs" style={{ backgroundColor: prov.color }}>
+                        {prov.short}
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-sm">{server.name}</h3>
+                        <div className="text-xs text-[var(--muted)]">
+                          {server.server_type === "kubernetes" ? "K8s" : "VM"} &middot; {server.endpoint}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2.5 h-2.5 rounded-full ${statusColors[server.status] || "bg-[var(--muted)]"}`} />
+                      <span className="text-xs font-medium">
+                        {server.status === "online" ? "Connected" : server.status === "provisioning" ? "Provisioning" : server.status}
+                      </span>
+                      {server.status === "provisioning" && <Loader2 size={12} className="text-[var(--warning)] animate-spin" />}
+                    </div>
+                  </div>
+
+                  {/* Hardware specs */}
+                  {server.specs && (
+                    <div className="flex flex-wrap gap-3 mb-3 text-xs">
+                      <span className="flex items-center gap-1.5 bg-[var(--background)] px-2.5 py-1 rounded-md">
+                        <Cpu size={12} className="text-[var(--accent)]" />
+                        {server.specs.cpu_cores} vCPU
+                      </span>
+                      <span className="flex items-center gap-1.5 bg-[var(--background)] px-2.5 py-1 rounded-md">
+                        <MemoryStick size={12} className="text-[var(--accent)]" />
+                        {server.specs.ram_mb >= 1024 ? `${(server.specs.ram_mb / 1024).toFixed(server.specs.ram_mb % 1024 === 0 ? 0 : 1)} GB` : `${server.specs.ram_mb} MB`}
+                      </span>
+                      <span className="flex items-center gap-1.5 bg-[var(--background)] px-2.5 py-1 rounded-md">
+                        <HardDrive size={12} className="text-[var(--accent)]" />
+                        {server.specs.disk_gb} GB
+                      </span>
+                      {server.specs.os && (
+                        <span className="flex items-center gap-1.5 bg-[var(--background)] px-2.5 py-1 rounded-md text-[var(--muted)]">
+                          {server.specs.os}
+                        </span>
+                      )}
+                      {server.region && (
+                        <span className="flex items-center gap-1.5 bg-[var(--background)] px-2.5 py-1 rounded-md text-[var(--muted)]">
+                          <Globe size={12} />
+                          {server.region}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Resource bars */}
+                  {server.status === "online" && m && (
+                    <div className="space-y-2.5 mb-4">
+                      <ResourceBar label="CPU" value={m.cpu_percent} />
+                      <ResourceBar label="Memory" value={m.ram_percent} />
+                      <ResourceBar label="Disk" value={m.disk_percent} />
+                    </div>
+                  )}
+
+                  {server.status === "provisioning" && (
+                    <div className="mb-4 text-xs text-[var(--warning)] flex items-center gap-2">
+                      <Loader2 size={12} className="animate-spin" />
+                      Setting up environment...
+                    </div>
+                  )}
+
+                  {/* Timestamp + refresh */}
+                  {server.status === "online" && (
+                    <div className="text-right mb-3">
+                      <span className="text-[10px] text-[var(--muted)]">
+                        {new Date().toLocaleString()} <RefreshCw size={10} className="inline ml-1 cursor-pointer hover:text-[var(--accent)]" onClick={loadServers} />
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Footer: instances count + security + actions */}
+                  <div className="flex items-center justify-between pt-3 border-t border-[var(--border)]">
+                    <span className="text-xs text-[var(--muted)]">
+                      {server.instances_count || 0} instance{(server.instances_count || 0) !== 1 ? "s" : ""}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {server.status === "online" && (
+                        <button
+                          onClick={() => {
+                            if (isExpanded) {
+                              setExpandedServer(null);
+                            } else {
+                              setExpandedServer(server.id);
+                              if (!sec) {
+                                serversApi.security(server.id).then((d) => {
+                                  setSecurityData((prev) => ({ ...prev, [server.id]: d }));
+                                }).catch(() => {});
+                              }
+                            }
+                          }}
+                          className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full transition-colors hover:bg-[var(--border)]"
+                          title="Security audit"
+                        >
+                          <ShieldCheck size={12} className={sec?.security_score >= 80 ? "text-[var(--success)]" : sec?.security_score >= 50 ? "text-[var(--warning)]" : "text-[var(--muted)]"} />
+                          {sec && <span className={sec.security_score >= 80 ? "text-[var(--success)]" : sec.security_score >= 50 ? "text-[var(--warning)]" : "text-[var(--danger)]"}>{sec.security_score}</span>}
+                          {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDeleteClick(server)}
+                        className="text-[var(--muted)] hover:text-[var(--danger)] transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Expanded security panel */}
+                  {isExpanded && sec && (
+                    <SecurityPanel server={server} data={sec} onReboot={() => {
+                      if (confirm(`Reboot server "${server.name}"? All instances will restart.`)) {
+                        serversApi.reboot(server.id).then(() => {
+                          alert("Reboot scheduled in 1 minute.");
+                        }).catch((e: any) => alert(e.message));
+                      }
+                    }} />
+                  )}
+                  {isExpanded && !sec && (
+                    <div className="mt-4 flex items-center justify-center py-4">
+                      <Loader2 size={16} className="animate-spin text-[var(--accent)]" />
+                      <span className="ml-2 text-xs text-[var(--muted)]">Running security audit...</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className="text-right text-xs text-[var(--muted)] mt-4">
+            Showing <span className="font-semibold text-[var(--accent)]">{filteredServers.length}</span> Server{filteredServers.length !== 1 ? "s" : ""} of <span className="font-semibold text-[var(--accent)]">{servers.length}</span> Server{servers.length !== 1 ? "s" : ""}.
+          </div>
+        </>
       )}
 
       {showWizard && (
@@ -280,7 +472,88 @@ export function ServerList() {
           onConnected={() => { setShowWizard(false); loadServers(); }}
         />
       )}
+
+      {/* Delete confirmation dialog */}
+      {deleteDialog && (
+        <DeleteServerDialog
+          name={deleteDialog.name}
+          provider={deleteDialog.provider}
+          hasCloud={deleteDialog.hasCloud}
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setDeleteDialog(null)}
+        />
+      )}
     </>
+  );
+}
+
+// ─── Empty State ─────────────────────────────────────────────────────
+
+function DeleteServerDialog({ name, provider, hasCloud, onConfirm, onCancel }: {
+  name: string; provider?: string; hasCloud: boolean;
+  onConfirm: (destroyCloud: boolean) => void; onCancel: () => void;
+}) {
+  const [destroyCloud, setDestroyCloud] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const providerLabel = provider ? (providerLogos[provider]?.label || provider) : "";
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div
+        className="bg-[var(--card)] border border-[var(--border)] rounded-2xl w-full max-w-md p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-xl bg-[var(--danger)]/10 flex items-center justify-center">
+            <Trash2 size={20} className="text-[var(--danger)]" />
+          </div>
+          <div>
+            <h3 className="font-semibold">Remove Server</h3>
+            <p className="text-sm text-[var(--muted)]">{name}</p>
+          </div>
+        </div>
+
+        <p className="text-sm text-[var(--muted)] mb-4">
+          This will remove the server from your dashboard and delete all associated instances.
+        </p>
+
+        {hasCloud && (
+          <label className="flex items-start gap-3 p-3 rounded-lg bg-[var(--danger)]/5 border border-[var(--danger)]/20 cursor-pointer mb-4">
+            <input
+              type="checkbox"
+              checked={destroyCloud}
+              onChange={(e) => setDestroyCloud(e.target.checked)}
+              className="mt-0.5 accent-[var(--danger)]"
+            />
+            <div>
+              <span className="text-sm font-medium text-[var(--danger)]">
+                Also destroy on {providerLabel}
+              </span>
+              <p className="text-xs text-[var(--muted)] mt-0.5">
+                The server will be permanently deleted from your {providerLabel} account. This stops all billing.
+              </p>
+            </div>
+          </label>
+        )}
+
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-sm text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={async () => { setDeleting(true); await onConfirm(destroyCloud); }}
+            disabled={deleting}
+            className="px-4 py-2 text-sm font-medium bg-[var(--danger)] hover:bg-[var(--danger)]/80 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+          >
+            {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+            {destroyCloud ? "Remove & Destroy" : "Remove"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -321,7 +594,7 @@ function EmptyState({ onConnect }: { onConnect: () => void }) {
   );
 }
 
-// ─── Metric Bar ──────────────────────────────────────────────────────
+// ─── Metric Bar (legacy, used by other components) ──────────────────
 
 function MetricBar({ label, value, icon: Icon }: { label: string; value?: number; icon: any }) {
   const v = value ?? 0;
@@ -335,6 +608,27 @@ function MetricBar({ label, value, icon: Icon }: { label: string; value?: number
       <div className="h-1.5 bg-[var(--border)] rounded-full overflow-hidden">
         <div className={`h-full ${color} rounded-full transition-all`} style={{ width: `${v}%` }} />
       </div>
+    </div>
+  );
+}
+
+// ─── Resource Bar (CloudPepper-style stacked bar) ───────────────────
+
+function ResourceBar({ label, value }: { label: string; value?: number }) {
+  const v = value ?? 0;
+  // Green for used, orange for warning zone, remaining is empty
+  const isWarning = v > 70;
+  const isCritical = v > 90;
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-xs font-semibold w-16">{label}</span>
+      <div className="flex-1 h-4 bg-[var(--border)] rounded overflow-hidden flex">
+        <div
+          className={`h-full transition-all ${isCritical ? "bg-red-500" : isWarning ? "bg-amber-500" : "bg-emerald-500"}`}
+          style={{ width: `${Math.min(v, 100)}%` }}
+        />
+      </div>
+      <span className="text-xs text-[var(--muted)] w-10 text-right">{v}%</span>
     </div>
   );
 }
@@ -591,9 +885,11 @@ function ConnectServerWizard({ onClose, onConnected }: { onClose: () => void; on
   const sym = currencySymbol[providerInfo?.currency || "USD"] || "$";
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div
-        className="bg-[var(--card)] border border-[var(--border)] rounded-2xl w-full max-w-3xl overflow-hidden max-h-[90vh] flex flex-col"
+        className={`bg-[var(--card)] border border-[var(--border)] rounded-2xl w-full overflow-hidden max-h-[90vh] flex flex-col ${
+          mode === "create" && createStep === "plan" ? "max-w-5xl" : "max-w-3xl"
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -801,11 +1097,7 @@ function ChooseProvider({ providers, selected, onSelect, onBack }: {
 // ─── Create: Plan Selection (Smart Guided) ──────────────────────────
 
 const CMS_OPTIONS = [
-  { id: "odoo-18", label: "Odoo 18", icon: "O18" },
-  { id: "odoo-17", label: "Odoo 17", icon: "O17" },
-  { id: "odoo-16", label: "Odoo 16", icon: "O16" },
-  { id: "odoo-15", label: "Odoo 15", icon: "O15" },
-  { id: "odoo-14", label: "Odoo 14", icon: "O14" },
+  { id: "odoo", label: "Odoo", icon: "OD" },
   { id: "wordpress", label: "WordPress", icon: "WP" },
   { id: "woocommerce", label: "WooCommerce", icon: "WC" },
   { id: "prestashop", label: "PrestaShop", icon: "PS" },
@@ -877,172 +1169,170 @@ function CreatePlanStep({ plans, regions, loading, form, setForm, sym, provider,
   }
 
   return (
-    <div className="space-y-5">
-      {/* Server Name */}
-      <div>
-        <label className="block text-sm font-medium mb-1.5">Server Name</label>
-        <input
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-          placeholder="e.g. production-01"
-          className="w-full bg-[var(--background)] border border-[var(--border)] rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[var(--accent)]"
-          autoFocus
-        />
-      </div>
-
-      {/* CMS Selection */}
-      <div>
-        <label className="block text-sm font-medium mb-2">What will you install?</label>
-        <div className="grid grid-cols-3 gap-2">
-          {CMS_OPTIONS.map((cms) => (
-            <button
-              key={cms.id}
-              type="button"
-              onClick={() => { setCmsFilter(cms.id); setForm({ ...form, plan: "" }); }}
-              className={`px-3 py-2.5 rounded-xl text-left transition-all ${
-                cmsFilter === cms.id
-                  ? "bg-[var(--accent)]/10 border-2 border-[var(--accent)]"
-                  : "bg-[var(--background)] border border-[var(--border)] hover:border-[var(--accent)]/30"
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0 ${
-                  cmsFilter === cms.id ? "bg-[var(--accent)] text-white" : "bg-[var(--border)] text-[var(--muted)]"
-                }`}>
-                  {cms.icon}
-                </span>
-                <span className={`text-xs font-medium ${cmsFilter === cms.id ? "text-[var(--foreground)]" : "text-[var(--muted)]"}`}>
-                  {cms.label}
-                </span>
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Workload Selection */}
-      {cmsFilter && (
+    <div className="flex flex-col lg:flex-row gap-6 min-h-0">
+      {/* Left column — Configuration */}
+      <div className="lg:w-[340px] shrink-0 space-y-4">
+        {/* Server Name */}
         <div>
-          <label className="block text-sm font-medium mb-2">Expected workload</label>
-          <div className="grid grid-cols-3 gap-2">
-            {WORKLOAD_OPTIONS.map((wl) => {
-              const Icon = wl.icon;
-              return (
-                <button
-                  key={wl.id}
-                  type="button"
-                  onClick={() => { setWorkloadFilter(wl.id); setForm({ ...form, plan: "" }); }}
-                  className={`px-3 py-3 rounded-xl text-left transition-all ${
-                    workloadFilter === wl.id
-                      ? "bg-[var(--accent)]/10 border-2 border-[var(--accent)]"
-                      : "bg-[var(--background)] border border-[var(--border)] hover:border-[var(--accent)]/30"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <Icon size={14} className={workloadFilter === wl.id ? "text-[var(--accent)]" : "text-[var(--muted)]"} />
-                    <span className={`text-xs font-semibold ${workloadFilter === wl.id ? "text-[var(--foreground)]" : "text-[var(--muted)]"}`}>
-                      {wl.label}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-[var(--muted)] leading-tight">{wl.desc}</p>
-                </button>
-              );
-            })}
-          </div>
+          <label className="block text-xs font-medium text-[var(--muted)] mb-1">Server Name</label>
+          <input
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            placeholder="e.g. production-01"
+            className="w-full bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--accent)]"
+            autoFocus
+          />
         </div>
-      )}
 
-      {/* Region */}
-      {cmsFilter && (
+        {/* CMS Selection */}
         <div>
-          <label className="block text-sm font-medium mb-1.5">Region</label>
-          <div className="flex gap-2 flex-wrap">
-            {availableRegions.slice(0, 12).map((r) => (
+          <label className="block text-xs font-medium text-[var(--muted)] mb-1.5">What will you install?</label>
+          <div className="grid grid-cols-3 lg:grid-cols-2 gap-1.5">
+            {CMS_OPTIONS.map((cms) => (
               <button
-                key={r.id || r.name}
+                key={cms.id}
                 type="button"
-                onClick={() => setForm({ ...form, region: r.id || r.name })}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  form.region === (r.id || r.name)
-                    ? "bg-[var(--accent)] text-white"
-                    : "bg-[var(--background)] border border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent)]/50"
+                onClick={() => { setCmsFilter(cms.id); setForm({ ...form, plan: "" }); }}
+                className={`px-2.5 py-2 rounded-lg text-left transition-all ${
+                  cmsFilter === cms.id
+                    ? "bg-[var(--accent)]/10 border-2 border-[var(--accent)]"
+                    : "bg-[var(--background)] border border-[var(--border)] hover:border-[var(--accent)]/30"
                 }`}
               >
-                {r.city || r.name}{r.country ? ` (${r.country})` : ""}
+                <div className="flex items-center gap-2">
+                  <span className={`w-7 h-7 rounded-md flex items-center justify-center text-[9px] font-bold shrink-0 ${
+                    cmsFilter === cms.id ? "bg-[var(--accent)] text-white" : "bg-[var(--border)] text-[var(--muted)]"
+                  }`}>
+                    {cms.icon}
+                  </span>
+                  <span className={`text-xs font-medium ${cmsFilter === cms.id ? "text-[var(--foreground)]" : "text-[var(--muted)]"}`}>
+                    {cms.label}
+                  </span>
+                </div>
               </button>
             ))}
           </div>
         </div>
-      )}
 
-      {/* Recommended Plans */}
-      {cmsFilter && (
-        <div>
-          <label className="block text-sm font-medium mb-2">
-            {hasResults ? "Recommended plans" : "No plans available"}
-          </label>
-
-          <div className="grid gap-2 max-h-[260px] overflow-y-auto pr-1">
-            {/* Perfect fit */}
-            {perfectPlans.map((plan, i) => (
-              <PlanCard
-                key={plan.id || plan.name}
-                plan={plan}
-                selected={form.plan === (plan.name || plan.id)}
-                sym={sym}
-                fitLevel="perfect"
-                isBestValue={i === 0}
-                onClick={() => setForm({ ...form, plan: plan.name || plan.id })}
-              />
-            ))}
-
-            {/* Good fit (separator) */}
-            {goodPlans.length > 0 && perfectPlans.length > 0 && (
-              <div className="flex items-center gap-2 py-1">
-                <div className="flex-1 h-px bg-[var(--border)]" />
-                <span className="text-[10px] text-[var(--muted)]">Also compatible</span>
-                <div className="flex-1 h-px bg-[var(--border)]" />
-              </div>
-            )}
-            {goodPlans.map((plan) => (
-              <PlanCard
-                key={plan.id || plan.name}
-                plan={plan}
-                selected={form.plan === (plan.name || plan.id)}
-                sym={sym}
-                fitLevel="good"
-                onClick={() => setForm({ ...form, plan: plan.name || plan.id })}
-              />
-            ))}
-
-            {!hasResults && cmsFilter && (
-              <div className="text-center py-8 text-sm text-[var(--muted)]">
-                No plans available for this CMS and workload combination with this provider.
-              </div>
-            )}
+        {/* Workload Selection */}
+        {cmsFilter && (
+          <div>
+            <label className="block text-xs font-medium text-[var(--muted)] mb-1.5">Expected workload</label>
+            <div className="flex gap-1.5">
+              {WORKLOAD_OPTIONS.map((wl) => {
+                const Icon = wl.icon;
+                return (
+                  <button
+                    key={wl.id}
+                    type="button"
+                    onClick={() => { setWorkloadFilter(wl.id); setForm({ ...form, plan: "" }); }}
+                    className={`flex-1 px-2 py-2 rounded-lg text-center transition-all ${
+                      workloadFilter === wl.id
+                        ? "bg-[var(--accent)]/10 border-2 border-[var(--accent)]"
+                        : "bg-[var(--background)] border border-[var(--border)] hover:border-[var(--accent)]/30"
+                    }`}
+                  >
+                    <Icon size={13} className={`mx-auto mb-0.5 ${workloadFilter === wl.id ? "text-[var(--accent)]" : "text-[var(--muted)]"}`} />
+                    <span className={`text-[11px] font-semibold block ${workloadFilter === wl.id ? "text-[var(--foreground)]" : "text-[var(--muted)]"}`}>
+                      {wl.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* No CMS selected — show hint */}
-      {!cmsFilter && (
-        <div className="text-center py-6 text-sm text-[var(--muted)]">
-          Select a CMS above to see recommended server configurations
-        </div>
-      )}
+        {/* Region */}
+        {cmsFilter && (
+          <div>
+            <label className="block text-xs font-medium text-[var(--muted)] mb-1.5">Region</label>
+            <div className="flex gap-1.5 flex-wrap">
+              {availableRegions.slice(0, 12).map((r) => (
+                <button
+                  key={r.id || r.name}
+                  type="button"
+                  onClick={() => setForm({ ...form, region: r.name || String(r.id) })}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${
+                    form.region === (r.name || String(r.id))
+                      ? "bg-[var(--accent)] text-white"
+                      : "bg-[var(--background)] border border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent)]/50"
+                  }`}
+                >
+                  {r.city || r.name}{r.country ? ` (${r.country})` : ""}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
-      {/* Navigation */}
-      <div className="flex justify-between pt-2">
-        <button onClick={onBack} className="px-4 py-2.5 text-sm text-[var(--muted)] hover:text-[var(--foreground)] flex items-center gap-2">
-          <ArrowLeft size={14} /> Back
-        </button>
-        <button
-          onClick={onNext}
-          disabled={!form.name.trim() || !form.plan || !form.region}
-          className="px-5 py-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-40 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
-        >
-          Review <ArrowRight size={14} />
-        </button>
+        {/* Navigation */}
+        <div className="flex justify-between pt-1">
+          <button onClick={onBack} className="px-3 py-2 text-sm text-[var(--muted)] hover:text-[var(--foreground)] flex items-center gap-2">
+            <ArrowLeft size={14} /> Back
+          </button>
+          <button
+            onClick={onNext}
+            disabled={!form.name.trim() || !form.plan || !form.region}
+            className="px-5 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-40 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+          >
+            Review <ArrowRight size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Right column — Plans */}
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+        {cmsFilter ? (
+          <>
+            <label className="block text-xs font-medium text-[var(--muted)] mb-2">
+              {hasResults ? `Recommended plans (${perfectPlans.length + goodPlans.length})` : "No plans available"}
+            </label>
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-1">
+              {/* Perfect fit */}
+              {perfectPlans.map((plan, i) => (
+                <PlanCard
+                  key={plan.id || plan.name}
+                  plan={plan}
+                  selected={form.plan === (plan.name || plan.id)}
+                  sym={sym}
+                  fitLevel="perfect"
+                  isBestValue={i === 0}
+                  onClick={() => setForm({ ...form, plan: plan.name || plan.id })}
+                />
+              ))}
+
+              {/* Good fit (separator) */}
+              {goodPlans.length > 0 && perfectPlans.length > 0 && (
+                <div className="flex items-center gap-2 py-1">
+                  <div className="flex-1 h-px bg-[var(--border)]" />
+                  <span className="text-[10px] text-[var(--muted)]">Also compatible</span>
+                  <div className="flex-1 h-px bg-[var(--border)]" />
+                </div>
+              )}
+              {goodPlans.map((plan) => (
+                <PlanCard
+                  key={plan.id || plan.name}
+                  plan={plan}
+                  selected={form.plan === (plan.name || plan.id)}
+                  sym={sym}
+                  fitLevel="good"
+                  onClick={() => setForm({ ...form, plan: plan.name || plan.id })}
+                />
+              ))}
+
+              {!hasResults && cmsFilter && (
+                <div className="text-center py-8 text-sm text-[var(--muted)]">
+                  No plans available for this CMS and workload combination with this provider.
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-sm text-[var(--muted)]">
+            Select a CMS to see recommended plans
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1066,13 +1356,6 @@ function PlanCard({ plan, selected, sym, fitLevel, isBestValue, onClick }: {
             : "bg-[var(--background)] border border-[var(--border)] hover:border-[var(--accent)]/30"
       }`}
     >
-      {/* Best value badge */}
-      {isBestValue && (
-        <span className="absolute -top-2.5 right-3 text-[10px] px-2.5 py-1 rounded-full bg-emerald-500 text-white font-bold tracking-wide shadow-lg shadow-emerald-500/30">
-          BEST VALUE
-        </span>
-      )}
-
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           {/* Fit indicator */}
@@ -1082,6 +1365,24 @@ function PlanCard({ plan, selected, sym, fitLevel, isBestValue, onClick }: {
 
           {/* Plan name */}
           <span className="font-mono font-bold text-sm w-[80px] shrink-0">{plan.name}</span>
+
+          {/* CPU type badge */}
+          {(() => {
+            const name = plan.name || "";
+            if (name.startsWith("ccx")) return (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 font-medium shrink-0">Dedicated</span>
+            );
+            if (name.startsWith("cpx")) return (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-medium shrink-0">Performance</span>
+            );
+            if (name.startsWith("cx")) return (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-400 font-medium shrink-0">Cost Optimized</span>
+            );
+            if ((plan as any).plan_category) return (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-400 font-medium shrink-0">{(plan as any).plan_category}</span>
+            );
+            return null;
+          })()}
 
           {/* Specs */}
           <div className="flex items-center gap-3 text-xs text-[var(--muted)]">
@@ -1099,24 +1400,26 @@ function PlanCard({ plan, selected, sym, fitLevel, isBestValue, onClick }: {
                 <Activity size={11} /> {plan.transfer_tb} TB
               </span>
             ) : null}
-            {plan.cpu_type === "dedicated" && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 font-medium">
-                Dedicated
-              </span>
-            )}
           </div>
         </div>
 
-        {/* Price */}
-        <div className="text-right shrink-0 ml-3">
-          <div className="text-sm font-bold text-[var(--accent)]">
-            {sym}{plan.price_monthly.toFixed(2)}<span className="text-[10px] font-normal text-[var(--muted)]">/mo</span>
-          </div>
-          {plan.price_hourly > 0 && (
-            <div className="text-[10px] text-[var(--muted)] flex items-center justify-end gap-0.5">
-              <Clock size={9} /> {sym}{plan.price_hourly.toFixed(4)}/h
-            </div>
+        {/* Price + Best Value */}
+        <div className="text-right shrink-0 ml-3 flex items-center gap-2">
+          {isBestValue && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-white font-bold tracking-wide whitespace-nowrap">
+              BEST VALUE
+            </span>
           )}
+          <div>
+            <div className="text-sm font-bold text-[var(--accent)]">
+              {sym}{plan.price_monthly.toFixed(2)}<span className="text-[10px] font-normal text-[var(--muted)]">/mo</span>
+            </div>
+            {plan.price_hourly > 0 && (
+              <div className="text-[10px] text-[var(--muted)] flex items-center justify-end gap-0.5">
+                <Clock size={9} /> {sym}{plan.price_hourly.toFixed(4)}/h
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </button>
@@ -1130,7 +1433,7 @@ function CreateConfirmStep({ form, plans, regions, provider, providerName, sym, 
   sym: string; creating: boolean; error: string; onCreate: () => void; onBack: () => void;
 }) {
   const plan = plans.find((p) => p.name === form.plan || p.id === form.plan);
-  const region = regions.find((r) => (r.id || r.name) === form.region);
+  const region = regions.find((r) => (r.name || String(r.id)) === form.region);
 
   return (
     <div className="space-y-5">

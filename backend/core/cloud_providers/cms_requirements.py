@@ -12,55 +12,15 @@ from __future__ import annotations
 # Base requirements per CMS (memory in MB, disk in GB)
 # These represent "startup" workload. Medium and intensive scale up.
 CMS_REQUIREMENTS: dict[str, dict] = {
-    "odoo-18": {
-        "label": "Odoo 18",
+    "odoo": {
+        "label": "Odoo",
         "min_ram_mb": 2048,
         "rec_ram_mb": 4096,
         "min_cores": 1,
         "rec_cores": 2,
         "min_disk_gb": 30,
         "rec_disk_gb": 60,
-        "notes": "Odoo 18 + PostgreSQL 16",
-    },
-    "odoo-17": {
-        "label": "Odoo 17",
-        "min_ram_mb": 2048,
-        "rec_ram_mb": 4096,
-        "min_cores": 1,
-        "rec_cores": 2,
-        "min_disk_gb": 30,
-        "rec_disk_gb": 60,
-        "notes": "Odoo 17 + PostgreSQL 16",
-    },
-    "odoo-16": {
-        "label": "Odoo 16",
-        "min_ram_mb": 2048,
-        "rec_ram_mb": 4096,
-        "min_cores": 1,
-        "rec_cores": 2,
-        "min_disk_gb": 25,
-        "rec_disk_gb": 50,
-        "notes": "Odoo 16 + PostgreSQL 15",
-    },
-    "odoo-15": {
-        "label": "Odoo 15",
-        "min_ram_mb": 1024,
-        "rec_ram_mb": 2048,
-        "min_cores": 1,
-        "rec_cores": 2,
-        "min_disk_gb": 25,
-        "rec_disk_gb": 40,
-        "notes": "Odoo 15 + PostgreSQL 14",
-    },
-    "odoo-14": {
-        "label": "Odoo 14",
-        "min_ram_mb": 1024,
-        "rec_ram_mb": 2048,
-        "min_cores": 1,
-        "rec_cores": 2,
-        "min_disk_gb": 20,
-        "rec_disk_gb": 40,
-        "notes": "Odoo 14 + PostgreSQL 13",
+        "notes": "Odoo (14-19) + PostgreSQL",
     },
     "wordpress": {
         "label": "WordPress",

@@ -738,7 +738,7 @@ class VMDriver(ServerDriver):
             "X11Forwarding no\n"
             "AllowAgentForwarding no\n"
             "SSHEOF\n"
-            "sshd -t && systemctl reload sshd",
+            "sshd -t && (systemctl reload sshd 2>/dev/null || systemctl reload ssh)",
             timeout=30,
         )
 

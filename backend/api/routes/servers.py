@@ -174,6 +174,17 @@ class ConnectServerRequest(BaseModel):
     namespace: str = "default"
 
 
+class ServerSpecs(BaseModel):
+    cpu_cores: int = 0
+    cpu_model: str = ""
+    ram_mb: int = 0
+    disk_gb: int = 0
+    disk_used_gb: int = 0
+    os: str = ""
+    kernel: str = ""
+    arch: str = ""
+
+
 class ServerResponse(BaseModel):
     id: str
     name: str
@@ -184,6 +195,8 @@ class ServerResponse(BaseModel):
     region: str | None = None
     instances_count: int = 0
     precheck: dict | None = None
+    specs: ServerSpecs | None = None
+    provider_plan: str | None = None
 
 
 @router.post("", response_model=ServerResponse, status_code=201)
@@ -242,13 +255,49 @@ async def connect_server(
     )
 
 
+async def _fetch_server_specs(driver: VMDriver, info: ServerInfo) -> dict:
+    """Fetch hardware specs from a server via SSH."""
+    try:
+        raw = await driver._ssh_exec(
+            info,
+            "echo CPU_CORES=$(nproc) && "
+            "echo CPU_MODEL=$(lscpu 2>/dev/null | grep 'Model name' | sed 's/.*: *//' || echo unknown) && "
+            "echo RAM_MB=$(free -m | awk '/Mem:/{print $2}') && "
+            "echo DISK_GB=$(df -BG / | awk 'NR==2{gsub(/G/,\"\",$2); print $2}') && "
+            "echo DISK_USED_GB=$(df -BG / | awk 'NR==2{gsub(/G/,\"\",$3); print $3}') && "
+            "echo OS=$(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d '\"' || uname -s) && "
+            "echo KERNEL=$(uname -r) && "
+            "echo ARCH=$(uname -m)"
+        )
+        specs = {}
+        for line in raw.strip().split("\n"):
+            if "=" in line:
+                key, val = line.split("=", 1)
+                specs[key.strip()] = val.strip()
+        return {
+            "cpu_cores": int(specs.get("CPU_CORES", 0)),
+            "cpu_model": specs.get("CPU_MODEL", "unknown"),
+            "ram_mb": int(specs.get("RAM_MB", 0)),
+            "disk_gb": int(specs.get("DISK_GB", 0)),
+            "disk_used_gb": int(specs.get("DISK_USED_GB", 0)),
+            "os": specs.get("OS", "unknown"),
+            "kernel": specs.get("KERNEL", ""),
+            "arch": specs.get("ARCH", ""),
+        }
+    except Exception as e:
+        logger.warning(f"Failed to fetch server specs: {e}")
+        return {}
+
+
 async def _provision_server_bg(server_id: str, info: ServerInfo):
-    """Background task: provision server (install Docker, create dirs)."""
+    """Background task: provision server (install Docker, create dirs) + fetch specs."""
     from core.database import async_session
 
     driver: VMDriver = _drivers["vm"]
     try:
         result = await driver.provision(info)
+        # Fetch hardware specs
+        specs = await _fetch_server_specs(driver, info)
         async with async_session() as db:
             srv = await db.get(Server, server_id)
             if srv:
@@ -256,6 +305,7 @@ async def _provision_server_bg(server_id: str, info: ServerInfo):
                     **(srv.meta or {}),
                     "provisioned": result["success"],
                     "provision_details": result,
+                    "specs": specs,
                 }
                 if not result["success"]:
                     srv.status = "error"
@@ -268,6 +318,7 @@ async def _provision_server_bg(server_id: str, info: ServerInfo):
 
 @router.get("", response_model=list[ServerResponse])
 async def list_servers(
+    bg: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -276,14 +327,33 @@ async def list_servers(
         .where(Server.owner_id == user["telegram_id"])
     )
     servers = result.scalars().all()
+    # Auto-fetch specs for online servers that don't have them yet
+    for s in servers:
+        if s.status == "online" and not (s.meta or {}).get("specs") and s.server_type == "vm":
+            bg.add_task(_fetch_and_store_specs, s.id, _to_server_info(s))
     return [
         ServerResponse(
             id=s.id, name=s.name, server_type=s.server_type,
             provider=s.provider, status=s.status, endpoint=s.endpoint,
             region=s.region, instances_count=len(s.instances),
+            specs=ServerSpecs(**(s.meta or {}).get("specs", {})) if (s.meta or {}).get("specs") else None,
+            provider_plan=(s.meta or {}).get("provider_plan"),
         )
         for s in servers
     ]
+
+
+async def _fetch_and_store_specs(server_id: str, info: ServerInfo):
+    """Background: fetch specs and store in meta."""
+    from core.database import async_session
+    driver: VMDriver = _drivers["vm"]
+    specs = await _fetch_server_specs(driver, info)
+    if specs:
+        async with async_session() as db:
+            srv = await db.get(Server, server_id)
+            if srv:
+                srv.meta = {**(srv.meta or {}), "specs": specs}
+                await db.commit()
 
 
 # --- Get ---
@@ -305,7 +375,30 @@ async def get_server(
         id=srv.id, name=srv.name, server_type=srv.server_type,
         provider=srv.provider, status=srv.status, endpoint=srv.endpoint,
         region=srv.region, instances_count=len(srv.instances),
+        specs=ServerSpecs(**(srv.meta or {}).get("specs", {})) if (srv.meta or {}).get("specs") else None,
+        provider_plan=(srv.meta or {}).get("provider_plan"),
     )
+
+
+# --- Specs (auto-fetch if missing) ---
+
+@router.post("/{server_id}/refresh-specs")
+async def refresh_server_specs(
+    server_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Re-fetch hardware specs from server via SSH."""
+    srv = await db.get(Server, server_id)
+    if not srv or srv.owner_id != user["telegram_id"]:
+        raise HTTPException(status_code=404, detail="Server not found")
+    info = _to_server_info(srv)
+    driver: VMDriver = _drivers["vm"]
+    specs = await _fetch_server_specs(driver, info)
+    if specs:
+        srv.meta = {**(srv.meta or {}), "specs": specs}
+        await db.commit()
+    return {"specs": specs}
 
 
 # --- Metrics ---
@@ -404,6 +497,7 @@ async def reboot_server(
 @router.delete("/{server_id}")
 async def remove_server(
     server_id: str,
+    destroy_cloud: bool = False,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -413,6 +507,44 @@ async def remove_server(
     srv = result.scalar_one_or_none()
     if not srv:
         raise HTTPException(status_code=404, detail="Server not found")
+
+    cloud_deleted = False
+    # If user opted to also destroy on the cloud provider
+    provider_id = (srv.meta or {}).get("provider_id")
+    if destroy_cloud and provider_id and srv.provider:
+        try:
+            from core.cloud_providers.hetzner import HetznerClient
+            from core.cloud_providers.digitalocean import DigitalOceanClient
+            from core.cloud_providers.vultr import VultrClient
+            from core.cloud_providers.linode import LinodeClient
+            from core.config import settings
+
+            if srv.provider == "hetzner" and settings.hetzner_api_token:
+                client = HetznerClient(settings.hetzner_api_token)
+                await client.delete_server(int(provider_id))
+                cloud_deleted = True
+            elif srv.provider == "digitalocean" and settings.digitalocean_api_token:
+                client = DigitalOceanClient(settings.digitalocean_api_token)
+                await client.delete_droplet(int(provider_id))
+                cloud_deleted = True
+            elif srv.provider == "vultr" and settings.vultr_api_key:
+                client = VultrClient(settings.vultr_api_key)
+                await client.delete_instance(provider_id)
+                cloud_deleted = True
+            elif srv.provider == "linode" and settings.linode_api_token:
+                client = LinodeClient(settings.linode_api_token)
+                await client.delete_linode(int(provider_id))
+                cloud_deleted = True
+            if cloud_deleted:
+                logger.info(f"Deleted {srv.provider} server {provider_id}")
+        except Exception as e:
+            logger.warning(f"Failed to delete cloud server {provider_id} on {srv.provider}: {e}")
+
     await db.delete(srv)
     await db.commit()
-    return {"detail": "Server removed"}
+    detail = "Server removed from dashboard"
+    if cloud_deleted:
+        detail += f" and destroyed on {srv.provider.title()}"
+    elif destroy_cloud and provider_id:
+        detail += f" (warning: cloud deletion on {srv.provider} may have failed)"
+    return {"detail": detail}

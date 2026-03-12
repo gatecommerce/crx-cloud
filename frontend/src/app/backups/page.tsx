@@ -206,7 +206,7 @@ function CreateBackupModal({ instances, onClose, onCreated }: { instances: any[]
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-semibold mb-4">Create Backup</h2>
         {error && (

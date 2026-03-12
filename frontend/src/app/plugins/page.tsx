@@ -11,7 +11,7 @@ const plugins = [
     id: "odoo",
     name: "Odoo",
     description: "Complete ERP & CMS platform. Community and Enterprise editions.",
-    versions: ["18.0", "17.0", "16.0"],
+    versions: ["19.0", "18.0", "17.0", "16.0"],
     available: true,
     color: "bg-purple-500/10 text-purple-400 border-purple-500/20",
   },

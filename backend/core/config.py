@@ -37,6 +37,7 @@ class Settings(BaseSettings):
 
     # Domain
     domain: str = os.getenv("CLOUD_DOMAIN", "cloud.crx.team")
+    site_domain: str = os.getenv("SITE_DOMAIN", "site.crx.team")
 
     # Cloud Providers
     hetzner_api_token: str = ""

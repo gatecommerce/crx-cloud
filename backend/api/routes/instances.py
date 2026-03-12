@@ -1,5 +1,9 @@
 """CMS instance management endpoints — wired to real CMS plugin drivers."""
 
+import logging
+import re
+import secrets
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -20,6 +24,14 @@ from core.orchestrator import (
     get_plugin,
 )
 
+try:
+    from core.dns_manager import create_subdomain, generate_subdomain
+except ImportError:
+    create_subdomain = None  # type: ignore[assignment]
+    generate_subdomain = None  # type: ignore[assignment]
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
@@ -33,6 +45,20 @@ class InstanceCreate(BaseModel):
     ram_mb: int = 2048
     cpu_cores: int = 1
     config: dict = {}
+    # Enterprise fields
+    admin_password: str = ""
+    language: str = "en_US"
+    country: str = ""
+    db_name: str = ""
+    use_external_db: bool = False
+    external_db_host: str = ""
+    external_db_port: int = 5432
+    external_db_name: str = ""
+    external_db_user: str = ""
+    external_db_password: str = ""
+    edition: str = "community"
+    demo_data: bool = False
+    auto_domain: bool = True
 
 
 class InstanceResponse(BaseModel):
@@ -96,6 +122,14 @@ async def _bg_deploy(instance_id: str, server_id: str):
         await deploy_instance(inst, server, db)
 
 
+def _slugify(name: str) -> str:
+    """Convert instance name to a valid subdomain slug."""
+    slug = name.lower().strip()
+    slug = re.sub(r"[^a-z0-9-]", "-", slug)
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    return slug or "instance"
+
+
 @router.get("", response_model=list[InstanceResponse])
 async def list_instances(
     server_id: str | None = None,
@@ -133,11 +167,47 @@ async def create_instance(
             detail=f"Unsupported version {body.version}. Available: {plugin.supported_versions}",
         )
 
+    # --- Enterprise feature: admin password auto-generation ---
+    admin_password = body.admin_password or secrets.token_urlsafe(12)
+
+    # --- Enterprise feature: auto-domain ---
+    domain = body.domain
+    if body.auto_domain and not domain:
+        slug = _slugify(body.name)
+        domain = f"{slug}.site.crx.team"
+        # Try to create DNS record if dns_manager is available
+        try:
+            if create_subdomain is not None:
+                await create_subdomain(slug, server.ip_address if hasattr(server, "ip_address") else "")
+        except Exception:
+            logger.warning("Failed to create DNS record for %s — continuing without it", domain)
+
+    # --- Build enriched config with all enterprise fields ---
+    instance_config = {**body.config}
+    instance_config.update({
+        "admin_password": admin_password,
+        "language": body.language,
+        "country": body.country,
+        "db_name": body.db_name or _slugify(body.name).replace("-", "_"),
+        "edition": body.edition,
+        "demo_data": body.demo_data,
+        "auto_domain": body.auto_domain,
+        "use_external_db": body.use_external_db,
+    })
+    if body.use_external_db:
+        instance_config.update({
+            "external_db_host": body.external_db_host,
+            "external_db_port": body.external_db_port,
+            "external_db_name": body.external_db_name,
+            "external_db_user": body.external_db_user,
+            "external_db_password": body.external_db_password,
+        })
+
     instance = Instance(
         name=body.name, cms_type=body.cms_type, version=body.version,
-        server_id=body.server_id, domain=body.domain, status="deploying",
+        server_id=body.server_id, domain=domain, status="deploying",
         workers=body.workers, ram_mb=body.ram_mb, cpu_cores=body.cpu_cores,
-        config=body.config, owner_id=user["telegram_id"],
+        config=instance_config, owner_id=user["telegram_id"],
     )
     db.add(instance)
     await db.commit()

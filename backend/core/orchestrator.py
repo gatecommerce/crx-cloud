@@ -16,6 +16,7 @@ from api.models.server import Server
 from api.models.backup import Backup
 from plugins.base import CMSPlugin, CMSInstance
 from plugins.odoo.driver import OdooPlugin
+from core.dns_manager import create_subdomain, remove_subdomain, generate_subdomain
 from core.nginx_manager import setup_nginx, remove_nginx, NginxConfig
 
 # Registry of available CMS plugins
@@ -88,8 +89,10 @@ async def deploy_instance(inst: Instance, server: Server, db: AsyncSession) -> N
         siblings = list(result.scalars().all())
         port = _next_port(siblings)
 
-        # Build deploy config
+        # Build deploy config — merge instance config so driver gets
+        # admin_password, db_name, language, country, edition, etc.
         deploy_config = {
+            **(inst.config or {}),
             "name": inst.name,
             "version": inst.version,
             "port": port,
@@ -116,8 +119,16 @@ async def deploy_instance(inst: Instance, server: Server, db: AsyncSession) -> N
         await db.commit()
         logger.info(f"Instance {inst.name} deployed successfully: {inst.url}")
 
-        # Configure Nginx reverse proxy if domain is set
+        # Configure DNS + Nginx reverse proxy if domain is set
         if inst.domain:
+            # Create Cloudflare DNS A record
+            try:
+                subdomain = inst.domain.replace(".site.crx.team", "")
+                await create_subdomain(subdomain, server.endpoint)
+                logger.info(f"DNS record created: {inst.domain} -> {server.endpoint}")
+            except Exception as e:
+                logger.warning(f"DNS creation failed for {inst.domain}: {e}")
+
             try:
                 nginx_ok = await setup_nginx(
                     host=server.endpoint,
@@ -133,10 +144,15 @@ async def deploy_instance(inst: Instance, server: Server, db: AsyncSession) -> N
                 if nginx_ok:
                     inst.url = f"https://{inst.domain}"
                     await db.commit()
-                    logger.info(f"Nginx configured for {inst.domain}")
+                    logger.info(f"Nginx + SSL configured for {inst.domain}")
                 else:
-                    logger.warning(f"Nginx setup failed for {inst.domain}, instance accessible via direct port")
+                    # Nginx failed but DNS is set — use http with domain:port
+                    inst.url = f"http://{inst.domain}:{port}"
+                    await db.commit()
+                    logger.warning(f"Nginx failed for {inst.domain}, using direct port")
             except Exception as e:
+                inst.url = f"http://{inst.domain}:{port}"
+                await db.commit()
                 logger.warning(f"Nginx setup error for {inst.domain}: {e}")
 
     except Exception as e:
@@ -181,8 +197,14 @@ async def remove_instance(inst: Instance, server: Server) -> bool:
     cms = _db_to_cms_instance(inst, server)
     result = await plugin.remove(cms)
 
-    # Cleanup Nginx config
+    # Cleanup DNS + Nginx config
     if inst.domain:
+        try:
+            subdomain = inst.domain.replace(".site.crx.team", "")
+            await remove_subdomain(subdomain)
+        except Exception as e:
+            logger.warning(f"DNS cleanup failed for {inst.domain}: {e}")
+
         try:
             await remove_nginx(
                 host=server.endpoint,

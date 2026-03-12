@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from api.routes import servers, instances, backups, plugins, health, vito, auth, cloud_providers
+from api.routes import settings as settings_routes
 from core.config import settings
 from core.database import init_db
 
@@ -59,3 +60,4 @@ app.include_router(backups.router, prefix="/api/v1/backups", tags=["backups"])
 app.include_router(plugins.router, prefix="/api/v1/plugins", tags=["plugins"])
 app.include_router(vito.router, prefix="/api/v1/vito", tags=["vito"])
 app.include_router(cloud_providers.router, prefix="/api/v1/cloud", tags=["cloud-providers"])
+app.include_router(settings_routes.router, prefix="/api/v1/settings", tags=["settings"])

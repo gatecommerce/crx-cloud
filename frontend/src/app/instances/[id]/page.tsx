@@ -11,8 +11,24 @@ import {
   ArrowLeft, Play, Square, RotateCcw, Trash2, ExternalLink,
   Cpu, MemoryStick, Users, Heart, ScrollText, Database,
   Loader2, CheckCircle, XCircle, AlertTriangle, Clock,
-  RefreshCw, Plus, ChevronDown, ChevronUp, Globe
+  RefreshCw, Plus, ChevronDown, ChevronUp, Globe,
+  LayoutDashboard, Settings2, Puzzle, GitBranch, Activity, Wrench,
+  Eye, EyeOff, Copy, Shield, Bell, BellOff, Calendar,
+  Save, ArrowUpDown, Gauge, HardDrive, Zap
 } from "lucide-react";
+
+type TabId = "dashboard" | "logs" | "backups" | "config" | "addons" | "staging" | "monitoring" | "settings";
+
+const TABS: { id: TabId; label: string; icon: typeof LayoutDashboard }[] = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "logs", label: "Logs", icon: ScrollText },
+  { id: "backups", label: "Backups", icon: Database },
+  { id: "config", label: "Config", icon: Settings2 },
+  { id: "addons", label: "Addons", icon: Puzzle },
+  { id: "staging", label: "Staging", icon: GitBranch },
+  { id: "monitoring", label: "Monitoring", icon: Activity },
+  { id: "settings", label: "Settings", icon: Wrench },
+];
 
 const statusColors: Record<string, string> = {
   running: "text-[var(--success)]",
@@ -40,14 +56,57 @@ export default function InstanceDetailPage() {
   const [backups, setBackups] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"overview" | "logs" | "backups">("overview");
+  const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [logsExpanded, setLogsExpanded] = useState(false);
   const [logLines, setLogLines] = useState(50);
+
+  // Dashboard state
+  const [showPassword, setShowPassword] = useState(false);
+  const [passwordCopied, setPasswordCopied] = useState(false);
+
+  // Config state
+  const [configForm, setConfigForm] = useState({
+    name: "",
+    domain: "",
+    workers: 2,
+    ram_mb: 1024,
+    auto_restart: true,
+  });
+  const [configSaving, setConfigSaving] = useState(false);
+
+  // Addons state
+  const [addonInput, setAddonInput] = useState("");
+  const [installedAddons] = useState<{ name: string; status: string; installed_at: string }[]>([
+    // Placeholder data
+  ]);
+
+  // Backups schedule state
+  const [backupSchedule, setBackupSchedule] = useState({
+    enabled: true,
+    frequency: "daily",
+    retention_days: 30,
+  });
+
+  // Settings state
+  const [settingsForm, setSettingsForm] = useState({
+    auto_backup: true,
+    backup_schedule: "daily",
+    notify_on_error: true,
+    notify_on_backup: false,
+  });
 
   const loadInstance = useCallback(async () => {
     try {
       const inst = await instancesApi.get(instanceId);
       setInstance(inst);
+      // Initialize config form from instance
+      setConfigForm({
+        name: inst.name || "",
+        domain: inst.domain || "",
+        workers: inst.workers || 2,
+        ram_mb: inst.ram_mb || 1024,
+        auto_restart: true,
+      });
       const [srv, bkps] = await Promise.all([
         serversApi.get(inst.server_id).catch(() => null),
         backupsApi.list(instanceId).catch(() => []),
@@ -153,6 +212,52 @@ export default function InstanceDetailPage() {
     }
   }
 
+  function handleCopyPassword() {
+    const pw = instance?.admin_password || "admin";
+    navigator.clipboard.writeText(pw).then(() => {
+      setPasswordCopied(true);
+      setTimeout(() => setPasswordCopied(false), 2000);
+    });
+  }
+
+  async function handleSaveConfig() {
+    setConfigSaving(true);
+    try {
+      // Try scaling workers if changed
+      if (configForm.workers !== instance.workers) {
+        await instancesApi.scale(instanceId, configForm.workers);
+      }
+      // Reload instance data
+      await loadInstance();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setConfigSaving(false);
+    }
+  }
+
+  // Helper: format uptime
+  function formatUptime(createdAt: string): string {
+    if (!createdAt) return "N/A";
+    const diff = Date.now() - new Date(createdAt).getTime();
+    const days = Math.floor(diff / 86400000);
+    const hours = Math.floor((diff % 86400000) / 3600000);
+    if (days > 0) return `${days}d ${hours}h`;
+    const mins = Math.floor((diff % 3600000) / 60000);
+    return `${hours}h ${mins}m`;
+  }
+
+  // Helper: last backup date
+  function getLastBackupInfo() {
+    if (backups.length === 0) return { date: "Never", ago: "" };
+    const sorted = [...backups].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const last = sorted[0];
+    const date = new Date(last.created_at).toLocaleString("it-IT", {
+      day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+    });
+    return { date, status: last.status };
+  }
+
   if (loading) {
     return (
       <AuthGuard>
@@ -167,6 +272,8 @@ export default function InstanceDetailPage() {
   }
 
   if (!instance) return null;
+
+  const lastBackup = getLastBackupInfo();
 
   return (
     <AuthGuard>
@@ -225,39 +332,87 @@ export default function InstanceDetailPage() {
                       {actionLoading === "start" ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} Start
                     </button>
                   )}
-                  <button
-                    onClick={handleDelete}
-                    disabled={!!actionLoading}
-                    className="px-3 py-2 text-sm rounded-lg text-[var(--danger)] hover:bg-[var(--danger)]/10 transition-colors flex items-center gap-2 disabled:opacity-50"
-                  >
-                    {actionLoading === "delete" ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Delete
-                  </button>
                 </div>
               </div>
 
-              {/* Tabs */}
-              <div className="flex gap-1 mb-6 border-b border-[var(--border)]">
-                {(["overview", "logs", "backups"] as const).map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`px-4 py-2.5 text-sm font-medium capitalize border-b-2 transition-colors ${
-                      activeTab === tab
-                        ? "border-[var(--accent)] text-[var(--accent)]"
-                        : "border-transparent text-[var(--muted)] hover:text-[var(--foreground)]"
-                    }`}
-                  >
-                    {tab === "overview" && <Heart size={14} className="inline mr-1.5" />}
-                    {tab === "logs" && <ScrollText size={14} className="inline mr-1.5" />}
-                    {tab === "backups" && <Database size={14} className="inline mr-1.5" />}
-                    {tab}
-                  </button>
-                ))}
+              {/* Tab Bar — Horizontal scrollable */}
+              <div className="overflow-x-auto -mx-6 px-6 mb-6">
+                <div className="flex gap-1 border-b border-[var(--border)] min-w-max">
+                  {TABS.map((tab) => {
+                    const Icon = tab.icon;
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+                          activeTab === tab.id
+                            ? "border-[var(--accent)] text-[var(--accent)]"
+                            : "border-transparent text-[var(--muted)] hover:text-[var(--foreground)]"
+                        }`}
+                      >
+                        <Icon size={14} />
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
-              {/* Tab Content */}
-              {activeTab === "overview" && (
+              {/* ========== DASHBOARD TAB ========== */}
+              {activeTab === "dashboard" && (
                 <div className="grid gap-4 md:grid-cols-2">
+                  {/* Instance Info */}
+                  <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
+                    <h3 className="text-sm font-semibold mb-4">Instance Info</h3>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-[var(--muted)]">Edition</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--accent)]/10 text-[var(--accent)] font-medium capitalize">
+                          {instance.edition || instance.cms_type || "Community"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-[var(--muted)]">Version</span>
+                        <span className="text-sm font-medium">{instance.version}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-[var(--muted)]">Uptime</span>
+                        <span className="text-sm font-medium flex items-center gap-1.5">
+                          {instance.status === "running" ? (
+                            <>
+                              <span className="w-2 h-2 rounded-full bg-[var(--success)] animate-pulse" />
+                              {formatUptime(instance.started_at || instance.created_at)}
+                            </>
+                          ) : (
+                            <span className="text-[var(--muted)]">Offline</span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-[var(--muted)]">Admin Password</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-mono">
+                            {showPassword ? (instance.admin_password || "admin") : "••••••••"}
+                          </span>
+                          <button
+                            onClick={() => setShowPassword(!showPassword)}
+                            className="p-1 text-[var(--muted)] hover:text-[var(--foreground)] rounded"
+                            title={showPassword ? "Hide" : "Show"}
+                          >
+                            {showPassword ? <EyeOff size={13} /> : <Eye size={13} />}
+                          </button>
+                          <button
+                            onClick={handleCopyPassword}
+                            className="p-1 text-[var(--muted)] hover:text-[var(--foreground)] rounded"
+                            title="Copy"
+                          >
+                            {passwordCopied ? <CheckCircle size={13} className="text-[var(--success)]" /> : <Copy size={13} />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Resources */}
                   <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
                     <h3 className="text-sm font-semibold mb-4">Resources</h3>
@@ -313,6 +468,29 @@ export default function InstanceDetailPage() {
                           <span className="text-sm font-medium">{server.name} ({server.endpoint})</span>
                         </div>
                       )}
+                    </div>
+                  </div>
+
+                  {/* Quick Stats */}
+                  <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
+                    <h3 className="text-sm font-semibold mb-4">Quick Stats</h3>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-2 text-sm text-[var(--muted)]"><Database size={14} /> Backups</span>
+                        <span className="text-sm font-medium">{backups.length}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-2 text-sm text-[var(--muted)]"><Clock size={14} /> Last Backup</span>
+                        <span className="text-sm font-medium">{lastBackup.date}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-2 text-sm text-[var(--muted)]"><Calendar size={14} /> Created</span>
+                        <span className="text-sm font-medium">
+                          {instance.created_at
+                            ? new Date(instance.created_at).toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit", year: "numeric" })
+                            : "N/A"}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -389,6 +567,7 @@ export default function InstanceDetailPage() {
                 </div>
               )}
 
+              {/* ========== LOGS TAB ========== */}
               {activeTab === "logs" && (
                 <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
@@ -432,8 +611,58 @@ export default function InstanceDetailPage() {
                 </div>
               )}
 
+              {/* ========== BACKUPS TAB ========== */}
               {activeTab === "backups" && (
                 <div>
+                  {/* Backup Schedule Section */}
+                  <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 mb-4">
+                    <h3 className="text-sm font-semibold mb-4">Backup Schedule</h3>
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div>
+                        <label className="text-xs text-[var(--muted)] mb-1.5 block">Automatic Backups</label>
+                        <button
+                          onClick={() => setBackupSchedule(s => ({ ...s, enabled: !s.enabled }))}
+                          className={`relative w-11 h-6 rounded-full transition-colors ${backupSchedule.enabled ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`}
+                        >
+                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${backupSchedule.enabled ? "translate-x-5" : ""}`} />
+                        </button>
+                      </div>
+                      <div>
+                        <label className="text-xs text-[var(--muted)] mb-1.5 block">Frequency</label>
+                        <select
+                          value={backupSchedule.frequency}
+                          onChange={(e) => setBackupSchedule(s => ({ ...s, frequency: e.target.value }))}
+                          className="w-full text-sm bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2"
+                        >
+                          <option value="daily">Daily</option>
+                          <option value="weekly">Weekly</option>
+                          <option value="monthly">Monthly</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs text-[var(--muted)] mb-1.5 block">Retention (days)</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={365}
+                          value={backupSchedule.retention_days}
+                          onChange={(e) => setBackupSchedule(s => ({ ...s, retention_days: parseInt(e.target.value) || 30 }))}
+                          className="w-full text-sm bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2"
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-3 flex items-center gap-2 text-xs text-[var(--muted)]">
+                      <Clock size={12} />
+                      Last backup: {lastBackup.date}
+                      {lastBackup.status && (
+                        <span className={`capitalize ${lastBackup.status === "completed" ? "text-[var(--success)]" : "text-[var(--warning)]"}`}>
+                          ({lastBackup.status})
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Backup List */}
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-sm font-semibold">Backups</h3>
                     <button
@@ -498,6 +727,395 @@ export default function InstanceDetailPage() {
                       </table>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* ========== CONFIG TAB ========== */}
+              {activeTab === "config" && (
+                <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
+                  <h3 className="text-sm font-semibold mb-6">Instance Configuration</h3>
+                  <div className="space-y-5 max-w-lg">
+                    {/* Instance Name */}
+                    <div>
+                      <label className="text-xs text-[var(--muted)] mb-1.5 block">Instance Name</label>
+                      <input
+                        type="text"
+                        value={configForm.name}
+                        onChange={(e) => setConfigForm(f => ({ ...f, name: e.target.value }))}
+                        className="w-full text-sm bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2 focus:outline-none focus:border-[var(--accent)]"
+                      />
+                    </div>
+
+                    {/* Domain */}
+                    <div>
+                      <label className="text-xs text-[var(--muted)] mb-1.5 block">Domain</label>
+                      <input
+                        type="text"
+                        value={configForm.domain}
+                        onChange={(e) => setConfigForm(f => ({ ...f, domain: e.target.value }))}
+                        placeholder="e.g. erp.example.com"
+                        className="w-full text-sm bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2 focus:outline-none focus:border-[var(--accent)]"
+                      />
+                      <p className="text-xs text-[var(--muted)] mt-1">Point your DNS A record to the server IP before changing.</p>
+                    </div>
+
+                    {/* Workers */}
+                    <div>
+                      <label className="text-xs text-[var(--muted)] mb-1.5 block">
+                        Workers: <span className="font-medium text-[var(--foreground)]">{configForm.workers}</span>
+                      </label>
+                      <input
+                        type="range"
+                        min={1}
+                        max={8}
+                        value={configForm.workers}
+                        onChange={(e) => setConfigForm(f => ({ ...f, workers: parseInt(e.target.value) }))}
+                        className="w-full accent-[var(--accent)]"
+                      />
+                      <div className="flex justify-between text-xs text-[var(--muted)] mt-1">
+                        <span>1</span>
+                        <span>8</span>
+                      </div>
+                    </div>
+
+                    {/* RAM */}
+                    <div>
+                      <label className="text-xs text-[var(--muted)] mb-1.5 block">RAM</label>
+                      <select
+                        value={configForm.ram_mb}
+                        onChange={(e) => setConfigForm(f => ({ ...f, ram_mb: parseInt(e.target.value) }))}
+                        className="w-full text-sm bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2"
+                      >
+                        <option value={512}>512 MB</option>
+                        <option value={1024}>1 GB</option>
+                        <option value={2048}>2 GB</option>
+                        <option value={4096}>4 GB</option>
+                        <option value={8192}>8 GB</option>
+                      </select>
+                    </div>
+
+                    {/* Auto-restart */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-sm font-medium block">Auto-restart on crash</label>
+                        <p className="text-xs text-[var(--muted)]">Automatically restart the instance if it crashes.</p>
+                      </div>
+                      <button
+                        onClick={() => setConfigForm(f => ({ ...f, auto_restart: !f.auto_restart }))}
+                        className={`relative w-11 h-6 rounded-full transition-colors ${configForm.auto_restart ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`}
+                      >
+                        <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${configForm.auto_restart ? "translate-x-5" : ""}`} />
+                      </button>
+                    </div>
+
+                    {/* Save */}
+                    <button
+                      onClick={handleSaveConfig}
+                      disabled={configSaving}
+                      className="px-4 py-2 text-sm rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors flex items-center gap-2 disabled:opacity-50"
+                    >
+                      {configSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save Configuration
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ========== ADDONS TAB ========== */}
+              {activeTab === "addons" && (
+                <div>
+                  {/* Install Module */}
+                  <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 mb-4">
+                    <h3 className="text-sm font-semibold mb-4">Install Module</h3>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={addonInput}
+                        onChange={(e) => setAddonInput(e.target.value)}
+                        placeholder="Module technical name (e.g. sale_management)"
+                        className="flex-1 text-sm bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2 focus:outline-none focus:border-[var(--accent)]"
+                      />
+                      <button
+                        disabled={!addonInput.trim() || instance.status !== "running"}
+                        className="px-4 py-2 text-sm rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Plus size={14} /> Install
+                      </button>
+                    </div>
+                    <p className="text-xs text-[var(--muted)] mt-2">
+                      Enter the technical name of the Odoo module to install. The instance will restart automatically.
+                    </p>
+                  </div>
+
+                  {/* Installed Modules */}
+                  <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
+                    <h3 className="text-sm font-semibold mb-4">Installed Modules</h3>
+                    {installedAddons.length === 0 ? (
+                      <div className="text-center py-8">
+                        <Puzzle size={32} className="mx-auto text-[var(--muted)] mb-3" />
+                        <p className="text-sm text-[var(--muted)]">Module management API coming soon.</p>
+                        <p className="text-xs text-[var(--muted)] mt-1">Installed modules will appear here once the API is available.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {installedAddons.map((addon) => (
+                          <div key={addon.name} className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-[var(--card-hover)]">
+                            <div className="flex items-center gap-3">
+                              <Puzzle size={14} className="text-[var(--muted)]" />
+                              <span className="text-sm font-medium">{addon.name}</span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className={`text-xs px-2 py-0.5 rounded-full capitalize ${
+                                addon.status === "installed"
+                                  ? "bg-[var(--success)]/10 text-[var(--success)]"
+                                  : "bg-[var(--warning)]/10 text-[var(--warning)]"
+                              }`}>
+                                {addon.status}
+                              </span>
+                              <span className="text-xs text-[var(--muted)]">{addon.installed_at}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ========== STAGING TAB ========== */}
+              {activeTab === "staging" && (
+                <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
+                  <h3 className="text-sm font-semibold mb-4">Staging Environment</h3>
+                  <div className="text-center py-12">
+                    <GitBranch size={40} className="mx-auto text-[var(--muted)] mb-4" />
+                    <h4 className="text-lg font-semibold mb-2">Coming Soon</h4>
+                    <p className="text-sm text-[var(--muted)] max-w-md mx-auto mb-6">
+                      Create a staging copy of your production instance to safely test updates, module installations, and configuration changes before going live.
+                    </p>
+                    <div className="grid gap-3 max-w-sm mx-auto text-left">
+                      <div className="flex items-start gap-3 text-sm text-[var(--muted)]">
+                        <CheckCircle size={16} className="text-[var(--accent)] mt-0.5 shrink-0" />
+                        <span>One-click staging copy from production</span>
+                      </div>
+                      <div className="flex items-start gap-3 text-sm text-[var(--muted)]">
+                        <CheckCircle size={16} className="text-[var(--accent)] mt-0.5 shrink-0" />
+                        <span>Sync data from production to staging</span>
+                      </div>
+                      <div className="flex items-start gap-3 text-sm text-[var(--muted)]">
+                        <CheckCircle size={16} className="text-[var(--accent)] mt-0.5 shrink-0" />
+                        <span>Promote staging to production when ready</span>
+                      </div>
+                    </div>
+                    <button
+                      disabled
+                      className="mt-6 px-4 py-2 text-sm rounded-lg bg-[var(--accent)] opacity-50 cursor-not-allowed flex items-center gap-2 mx-auto"
+                    >
+                      <GitBranch size={14} /> Create Staging Copy
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ========== MONITORING TAB ========== */}
+              {activeTab === "monitoring" && (
+                <div className="grid gap-4 md:grid-cols-2">
+                  {/* CPU Usage */}
+                  <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-semibold flex items-center gap-2"><Cpu size={14} /> CPU Usage</h3>
+                      <span className="text-sm font-medium text-[var(--foreground)]">
+                        {instance.status === "running" ? "23%" : "0%"}
+                      </span>
+                    </div>
+                    <div className="w-full h-3 bg-[var(--background)] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[var(--accent)] rounded-full transition-all"
+                        style={{ width: instance.status === "running" ? "23%" : "0%" }}
+                      />
+                    </div>
+                    <p className="text-xs text-[var(--muted)] mt-2">
+                      {instance.status === "running" ? `${instance.cpu_cores} cores allocated` : "Instance is offline"}
+                    </p>
+                  </div>
+
+                  {/* RAM Usage */}
+                  <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-semibold flex items-center gap-2"><MemoryStick size={14} /> RAM Usage</h3>
+                      <span className="text-sm font-medium text-[var(--foreground)]">
+                        {instance.status === "running"
+                          ? `${Math.round(instance.ram_mb * 0.45)} / ${instance.ram_mb} MB`
+                          : "0 MB"}
+                      </span>
+                    </div>
+                    <div className="w-full h-3 bg-[var(--background)] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[var(--success)] rounded-full transition-all"
+                        style={{ width: instance.status === "running" ? "45%" : "0%" }}
+                      />
+                    </div>
+                    <p className="text-xs text-[var(--muted)] mt-2">
+                      {instance.status === "running" ? "45% utilized" : "Instance is offline"}
+                    </p>
+                  </div>
+
+                  {/* Disk Usage */}
+                  <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-semibold flex items-center gap-2"><HardDrive size={14} /> Disk Usage</h3>
+                      <span className="text-sm font-medium text-[var(--foreground)]">
+                        {instance.status === "running" ? "2.1 / 10 GB" : "-- / -- GB"}
+                      </span>
+                    </div>
+                    <div className="w-full h-3 bg-[var(--background)] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[var(--warning)] rounded-full transition-all"
+                        style={{ width: instance.status === "running" ? "21%" : "0%" }}
+                      />
+                    </div>
+                    <p className="text-xs text-[var(--muted)] mt-2">
+                      {instance.status === "running" ? "21% utilized" : "Instance is offline"}
+                    </p>
+                  </div>
+
+                  {/* Uptime & Response */}
+                  <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
+                    <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><Gauge size={14} /> Uptime & Performance</h3>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-[var(--muted)]">Uptime (30d)</span>
+                        <span className="text-sm font-medium text-[var(--success)]">
+                          {instance.status === "running" ? "99.7%" : "N/A"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-[var(--muted)]">Avg Response Time</span>
+                        <span className="text-sm font-medium">
+                          {health?.response_time_ms ? `${health.response_time_ms}ms` : "N/A"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-[var(--muted)]">Current Status</span>
+                        <span className="flex items-center gap-1.5 text-sm">
+                          {instance.status === "running" ? (
+                            <>
+                              <span className="w-2 h-2 rounded-full bg-[var(--success)]" />
+                              <span className="text-[var(--success)]">Online</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="w-2 h-2 rounded-full bg-[var(--muted)]" />
+                              <span className="text-[var(--muted)]">Offline</span>
+                            </>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Response Time Graph Placeholder */}
+                  <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 md:col-span-2">
+                    <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><Activity size={14} /> Response Time (24h)</h3>
+                    <div className="h-40 flex items-center justify-center border border-dashed border-[var(--border)] rounded-lg">
+                      <div className="text-center">
+                        <Activity size={24} className="mx-auto text-[var(--muted)] mb-2" />
+                        <p className="text-xs text-[var(--muted)]">Response time graph will appear here when monitoring data is available.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ========== SETTINGS TAB ========== */}
+              {activeTab === "settings" && (
+                <div className="space-y-4">
+                  {/* Auto-backup */}
+                  <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
+                    <h3 className="text-sm font-semibold mb-4">Backup Settings</h3>
+                    <div className="space-y-4 max-w-lg">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <label className="text-sm font-medium block">Automatic Backups</label>
+                          <p className="text-xs text-[var(--muted)]">Automatically back up instance on a schedule.</p>
+                        </div>
+                        <button
+                          onClick={() => setSettingsForm(f => ({ ...f, auto_backup: !f.auto_backup }))}
+                          className={`relative w-11 h-6 rounded-full transition-colors ${settingsForm.auto_backup ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`}
+                        >
+                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${settingsForm.auto_backup ? "translate-x-5" : ""}`} />
+                        </button>
+                      </div>
+                      {settingsForm.auto_backup && (
+                        <div>
+                          <label className="text-xs text-[var(--muted)] mb-1.5 block">Backup Schedule</label>
+                          <select
+                            value={settingsForm.backup_schedule}
+                            onChange={(e) => setSettingsForm(f => ({ ...f, backup_schedule: e.target.value }))}
+                            className="w-full text-sm bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2"
+                          >
+                            <option value="daily">Daily at 02:00</option>
+                            <option value="weekly">Weekly (Sunday 02:00)</option>
+                            <option value="monthly">Monthly (1st at 02:00)</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Notifications */}
+                  <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
+                    <h3 className="text-sm font-semibold mb-4">Notifications</h3>
+                    <div className="space-y-4 max-w-lg">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <AlertTriangle size={16} className="text-[var(--danger)]" />
+                          <div>
+                            <label className="text-sm font-medium block">Error Notifications</label>
+                            <p className="text-xs text-[var(--muted)]">Receive alerts when the instance encounters errors.</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setSettingsForm(f => ({ ...f, notify_on_error: !f.notify_on_error }))}
+                          className={`relative w-11 h-6 rounded-full transition-colors ${settingsForm.notify_on_error ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`}
+                        >
+                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${settingsForm.notify_on_error ? "translate-x-5" : ""}`} />
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <Database size={16} className="text-[var(--accent)]" />
+                          <div>
+                            <label className="text-sm font-medium block">Backup Notifications</label>
+                            <p className="text-xs text-[var(--muted)]">Get notified when backups complete successfully.</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setSettingsForm(f => ({ ...f, notify_on_backup: !f.notify_on_backup }))}
+                          className={`relative w-11 h-6 rounded-full transition-colors ${settingsForm.notify_on_backup ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`}
+                        >
+                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${settingsForm.notify_on_backup ? "translate-x-5" : ""}`} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Danger Zone */}
+                  <div className="bg-[var(--card)] border border-[var(--danger)]/30 rounded-xl p-5">
+                    <h3 className="text-sm font-semibold mb-1 text-[var(--danger)]">Danger Zone</h3>
+                    <p className="text-xs text-[var(--muted)] mb-4">These actions are irreversible. Please proceed with caution.</p>
+                    <div className="flex items-center justify-between p-3 border border-[var(--danger)]/20 rounded-lg">
+                      <div>
+                        <p className="text-sm font-medium">Delete this instance</p>
+                        <p className="text-xs text-[var(--muted)]">Permanently delete {instance.name} and all associated data, backups, and configurations.</p>
+                      </div>
+                      <button
+                        onClick={handleDelete}
+                        disabled={!!actionLoading}
+                        className="px-4 py-2 text-sm rounded-lg border border-[var(--danger)] text-[var(--danger)] hover:bg-[var(--danger)] hover:text-white transition-colors flex items-center gap-2 disabled:opacity-50 shrink-0"
+                      >
+                        {actionLoading === "delete" ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Delete Instance
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

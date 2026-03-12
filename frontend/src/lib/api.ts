@@ -58,7 +58,8 @@ export const serversApi = {
   security: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/security`),
   updates: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/updates`),
   reboot: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/reboot`, { method: "POST" }),
-  remove: (id: string) => apiFetch<void>(`/api/v1/servers/${id}`, { method: "DELETE" }),
+  remove: (id: string, destroyCloud?: boolean) =>
+    apiFetch<{ detail: string }>(`/api/v1/servers/${id}${destroyCloud ? "?destroy_cloud=true" : ""}`, { method: "DELETE" }),
 };
 
 // Instance API
@@ -108,4 +109,26 @@ export const vitoApi = {
       "/api/v1/vito/chat",
       { method: "POST", body: JSON.stringify({ message, context }) }
     ),
+};
+
+// Settings API
+export const settingsApi = {
+  // API Keys
+  listApiKeys: () => apiFetch<any[]>("/api/v1/settings/api-keys"),
+  createApiKey: (name: string) =>
+    apiFetch<any>("/api/v1/settings/api-keys", { method: "POST", body: JSON.stringify({ name }) }),
+  deleteApiKey: (id: string) =>
+    apiFetch<any>(`/api/v1/settings/api-keys/${id}`, { method: "DELETE" }),
+  toggleApiKey: (id: string) =>
+    apiFetch<any>(`/api/v1/settings/api-keys/${id}/toggle`, { method: "PATCH" }),
+  // Backup Storages
+  listBackupStorages: () => apiFetch<any[]>("/api/v1/settings/backup-storages"),
+  createBackupStorage: (data: { name: string; provider: string; config: Record<string, any> }) =>
+    apiFetch<any>("/api/v1/settings/backup-storages", { method: "POST", body: JSON.stringify(data) }),
+  activateBackupStorage: (id: string) =>
+    apiFetch<any>(`/api/v1/settings/backup-storages/${id}/activate`, { method: "POST" }),
+  deleteBackupStorage: (id: string) =>
+    apiFetch<any>(`/api/v1/settings/backup-storages/${id}`, { method: "DELETE" }),
+  // Account
+  getAccount: () => apiFetch<any>("/api/v1/settings/account"),
 };

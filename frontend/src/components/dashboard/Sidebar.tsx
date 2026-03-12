@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { authApi } from "@/lib/api";
 import {
-  Server, Box, Database, Globe, Activity, Puzzle,
+  Server, Box, Database, Globe, Activity, Puzzle, Settings,
   ChevronLeft, ChevronRight, LogOut, User
 } from "lucide-react";
 
@@ -16,6 +16,7 @@ const navItems = [
   { icon: Globe, label: "Domains", href: "/domains" },
   { icon: Activity, label: "Monitoring", href: "/monitoring" },
   { icon: Puzzle, label: "Plugins", href: "/plugins" },
+  { icon: Settings, label: "Settings", href: "/settings" },
 ];
 
 export function Sidebar() {

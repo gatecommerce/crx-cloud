@@ -3,8 +3,8 @@
     "name": "Odoo",
     "description": "All-in-one business suite — ERP, CRM, eCommerce, Accounting",
     "icon": "odoo.svg",
-    "supported_versions": ["18.0", "17.0", "16.0"],
-    "default_version": "18.0",
+    "supported_versions": ["19.0", "18.0", "17.0", "16.0"],
+    "default_version": "19.0",
     "requires": {
         "database": "postgresql",
         "min_ram_mb": 2048,

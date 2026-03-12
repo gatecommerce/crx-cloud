@@ -5,6 +5,10 @@ Let's Encrypt certbot, and manages reload/test.
 """
 
 import asyncio
+import base64
+import os
+import shutil
+import tempfile
 from dataclasses import dataclass
 
 from loguru import logger
@@ -120,21 +124,54 @@ server {{
 """
 
 
+def _safe_key_path(key_path: str) -> str:
+    """Copy SSH key to a temp file with correct permissions (600).
+
+    Fixes two Windows Docker volume issues:
+    - Permissions: mounts show 0777, SSH rejects keys not 0600
+    - Line endings: Windows writes CRLF, OpenSSH requires LF
+    """
+    if not key_path or not os.path.exists(key_path):
+        return key_path
+    safe_dir = os.path.join(tempfile.gettempdir(), "crx_ssh")
+    os.makedirs(safe_dir, mode=0o700, exist_ok=True)
+    safe_path = os.path.join(safe_dir, os.path.basename(key_path))
+    # Read and strip CR (Windows CRLF -> Unix LF)
+    with open(key_path, "rb") as f:
+        content = f.read().replace(b"\r\n", b"\n")
+    with open(safe_path, "wb") as f:
+        f.write(content)
+    os.chmod(safe_path, 0o600)
+    return safe_path
+
+
+def _ssh_args(host: str, user: str, key_path: str) -> list[str]:
+    """Build SSH argument list."""
+    args = ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10"]
+    if key_path:
+        args += ["-i", _safe_key_path(key_path)]
+    args.append(f"{user}@{host}")
+    return args
+
+
 async def _ssh_exec(host: str, user: str, key_path: str, cmd: str) -> tuple[int, str]:
     """Execute command on remote server via SSH."""
-    ssh_opts = "-o StrictHostKeyChecking=no -o ConnectTimeout=10"
-    if key_path:
-        ssh_opts += f" -i {key_path}"
-
-    full_cmd = f'ssh {ssh_opts} {user}@{host} "{cmd}"'
-    proc = await asyncio.create_subprocess_shell(
-        full_cmd,
+    args = _ssh_args(host, user, key_path) + [cmd]
+    proc = await asyncio.create_subprocess_exec(
+        *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
     stdout, stderr = await proc.communicate()
     output = (stdout or b"").decode() + (stderr or b"").decode()
     return proc.returncode or 0, output.strip()
+
+
+async def _ssh_write_file(host: str, user: str, key_path: str, remote_path: str, content: str) -> tuple[int, str]:
+    """Write a file on the remote server via SSH using base64 to avoid shell escaping issues."""
+    b64 = base64.b64encode(content.encode()).decode()
+    cmd = f"echo {b64} | base64 -d > {remote_path}"
+    return await _ssh_exec(host, user, key_path, cmd)
 
 
 async def setup_nginx(
@@ -193,11 +230,8 @@ async def setup_nginx(
                 longpoll_port=longpoll_port,
             )
 
-        # Escape for shell
-        escaped = initial_conf.replace("'", "'\\''")
-        rc, out = await _ssh_exec(
-            host, ssh_user, ssh_key_path,
-            f"echo '{escaped}' > {conf_path}"
+        rc, out = await _ssh_write_file(
+            host, ssh_user, ssh_key_path, conf_path, initial_conf
         )
         if rc != 0:
             logger.error(f"Failed to write Nginx config: {out}")
@@ -238,10 +272,8 @@ async def setup_nginx(
                     upstream_port=config.upstream_port,
                     longpoll_port=longpoll_port,
                 )
-                escaped = final_conf.replace("'", "'\\''")
-                await _ssh_exec(
-                    host, ssh_user, ssh_key_path,
-                    f"echo '{escaped}' > {conf_path}"
+                await _ssh_write_file(
+                    host, ssh_user, ssh_key_path, conf_path, final_conf
                 )
 
                 # Test and reload

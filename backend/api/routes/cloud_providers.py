@@ -6,6 +6,7 @@ All responses use a normalized format for the frontend.
 """
 
 import asyncio
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
@@ -118,8 +119,7 @@ async def list_plans(provider: str, user: dict = Depends(get_current_user)):
 
         # Pre-compute workload fit for all CMS x workload combinations
         workload_fit: dict[str, dict[str, dict]] = {}
-        for cms_id in ["odoo-18", "odoo-17", "odoo-16", "odoo-15", "odoo-14",
-                        "wordpress", "woocommerce", "prestashop", "magento"]:
+        for cms_id in ["odoo", "wordpress", "woocommerce", "prestashop", "magento"]:
             workload_fit[cms_id] = {}
             for wl in ["startup", "medium", "intensive"]:
                 workload_fit[cms_id][wl] = get_workload_recommendations(
@@ -171,7 +171,12 @@ async def list_provider_servers(provider: str, user: dict = Depends(get_current_
 class CreateServerRequest(BaseModel):
     name: str
     plan: str
-    region: str
+    region: str | int
+
+    def model_post_init(self, __context: Any) -> None:
+        # Hetzner frontend may send numeric region ID — always coerce to string
+        if isinstance(self.region, int):
+            self.region = str(self.region)
 
 
 class CreateServerResponse(BaseModel):
@@ -260,8 +265,16 @@ async def create_server(
 
 async def _create_hetzner(client: HetznerClient, body: CreateServerRequest, pub_key: str) -> dict:
     ssh_key_id = await client.ensure_ssh_key(pub_key)
+    # Resolve numeric region ID to name (e.g. 1 → "fsn1")
+    location = body.region
+    if location.isdigit():
+        locs = await client.list_locations()
+        for loc in locs:
+            if str(loc["id"]) == location:
+                location = loc["name"]
+                break
     result = await client.create_server(
-        name=body.name, server_type=body.plan, location=body.region, ssh_key_ids=[ssh_key_id],
+        name=body.name, server_type=body.plan, location=location, ssh_key_ids=[ssh_key_id],
     )
     # Poll for IP if not assigned
     if not result["ip"]:
