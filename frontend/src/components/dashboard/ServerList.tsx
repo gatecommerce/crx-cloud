@@ -1067,8 +1067,8 @@ function PlanCard({ plan, selected, sym, fitLevel, isBestValue, onClick }: {
       }`}
     >
       {/* Best value badge */}
-      {isBestValue && !selected && (
-        <span className="absolute -top-2 right-3 text-[9px] px-2 py-0.5 rounded-full bg-[var(--success)] text-white font-bold">
+      {isBestValue && (
+        <span className="absolute -top-2.5 right-3 text-[10px] px-2.5 py-1 rounded-full bg-emerald-500 text-white font-bold tracking-wide shadow-lg shadow-emerald-500/30">
           BEST VALUE
         </span>
       )}
