@@ -56,6 +56,7 @@ class GitAddonCreate(BaseModel):
     branch: str = ""
     copy_method: str = "all"  # "all" or "specific"
     specific_addons: list[str] = []
+    access_token: str = ""  # PAT for private repos (GitHub, GitLab, Bitbucket)
 
 
 class GitAddonSettingsUpdate(BaseModel):
@@ -138,8 +139,10 @@ async def _bg_clone_addon(instance_id: str, server_id: str, addon_id: str):
             addon = _find_addon(config, addon_id)
 
             cms = _db_to_cms_instance(inst, server)
+            # Use clone_url (may contain PAT) for actual git clone
+            clone_url = addon.get("clone_url") or addon["url"]
             clone_result = await plugin.clone_addon(
-                cms, addon_id, addon["url"], addon["branch"]
+                cms, addon_id, clone_url, addon["branch"]
             )
 
             addon["current_commit"] = clone_result.get("commit", "")
@@ -342,16 +345,17 @@ async def list_addons(
             "update_available": update_available,
         })
 
-    # Git addons
+    # Git addons — never expose clone_url (may contain PAT)
     for ga in _get_git_addons(config):
         addons.append({
             "type": "git",
             "id": ga.get("id", ""),
             "name": ga.get("url", "").rstrip("/").rsplit("/", 1)[-1].replace(".git", ""),
-            "url": ga.get("url", ""),
+            "url": ga.get("url", ""),  # Display URL only, no token
             "branch": ga.get("branch", ""),
             "status": ga.get("status", "pending"),
             "current_commit": ga.get("current_commit", ""),
+            "has_token": ga.get("has_token", False),
             "auto_update": ga.get("auto_update", False),
             "auto_install_requirements": ga.get("auto_install_requirements", False),
             "auto_upgrade_modules": ga.get("auto_upgrade_modules", False),
@@ -386,8 +390,15 @@ async def add_git_addon(
 
     # Validate URL format
     url = body.url.strip()
-    if not (url.startswith("https://") or url.startswith("git@")):
-        raise HTTPException(status_code=400, detail="URL must start with https:// or git@")
+    if not (url.startswith("https://") or url.startswith("git@") or url.startswith("http://")):
+        raise HTTPException(status_code=400, detail="URL must start with https://, http://, or git@")
+
+    # Build clone URL with token for private repos
+    access_token = body.access_token.strip() if body.access_token else ""
+    clone_url = url
+    if access_token and url.startswith("https://"):
+        # Insert token into URL: https://TOKEN@github.com/org/repo.git
+        clone_url = url.replace("https://", f"https://{access_token}@", 1)
 
     addon_id = uuid.uuid4().hex[:12]
     now = datetime.now(timezone.utc).isoformat()
@@ -395,7 +406,9 @@ async def add_git_addon(
     addon_entry = {
         "id": addon_id,
         "type": "git",
-        "url": url,
+        "url": url,  # Display URL (no token)
+        "clone_url": clone_url,  # Actual clone URL (may contain token)
+        "has_token": bool(access_token),
         "branch": branch,
         "auto_update": False,
         "auto_install_requirements": False,

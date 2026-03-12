@@ -88,7 +88,7 @@ export const instancesApi = {
   removeEnterpriseAddons: (id: string) =>
     apiFetch<any>(`/api/v1/instances/${id}/addons/enterprise`, { method: "DELETE" }),
   // Git Addons
-  addGitAddon: (id: string, data: { url: string; branch: string; copy_method?: string; specific_addons?: string[] }) =>
+  addGitAddon: (id: string, data: { url: string; branch: string; copy_method?: string; specific_addons?: string[]; access_token?: string }) =>
     apiFetch<any>(`/api/v1/instances/${id}/addons/git`, { method: "POST", body: JSON.stringify(data) }),
   updateAddonSettings: (id: string, addonId: string, data: Record<string, any>) =>
     apiFetch<any>(`/api/v1/instances/${id}/addons/git/${addonId}/settings`, { method: "PATCH", body: JSON.stringify(data) }),

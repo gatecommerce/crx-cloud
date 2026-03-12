@@ -113,7 +113,7 @@ export default function InstanceDetailPage() {
   const [ocaSearch, setOcaSearch] = useState("");
   const [conflicts, setConflicts] = useState<any>(null);
   const [compatibility, setCompatibility] = useState<any>(null);
-  const [gitAddonForm, setGitAddonForm] = useState({ url: "", branch: "", copy_method: "all" as "all" | "specific", specific_addons: "" });
+  const [gitAddonForm, setGitAddonForm] = useState({ url: "", branch: "", copy_method: "all" as "all" | "specific", specific_addons: "", access_token: "" });
   const [gitAddonAdding, setGitAddonAdding] = useState(false);
   const [gitAddonRemoving, setGitAddonRemoving] = useState<string | null>(null);
 
@@ -1000,6 +1000,11 @@ export default function InstanceDetailPage() {
                                   <td className="py-3 pr-4">
                                     {addon.type === "git" && addon.url ? (
                                       <div className="flex items-center gap-2">
+                                        {addon.has_token && (
+                                          <span title="Private repository (token auth)">
+                                            <Shield size={12} className="text-amber-400 shrink-0" />
+                                          </span>
+                                        )}
                                         <span className="font-medium text-white truncate max-w-[200px]" title={addon.url}>
                                           {addon.name || addon.url.replace(/\.git$/, "").split("/").slice(-2).join("/")}
                                         </span>
@@ -1284,7 +1289,7 @@ export default function InstanceDetailPage() {
                     <div className="mt-4 flex items-center gap-3 flex-wrap">
                       <button
                         onClick={() => {
-                          setGitAddonForm({ url: "", branch: instance?.version || "", copy_method: "all", specific_addons: "" });
+                          setGitAddonForm({ url: "", branch: instance?.version || "", copy_method: "all", specific_addons: "", access_token: "" });
                           setShowAddGitModal(true);
                         }}
                         className="px-4 py-2 text-sm rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors flex items-center gap-2"
@@ -1651,6 +1656,19 @@ export default function InstanceDetailPage() {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">Access Token <span className="text-gray-500 font-normal">(optional — for private repos)</span></label>
+                  <input
+                    value={gitAddonForm.access_token}
+                    onChange={(e) => setGitAddonForm({ ...gitAddonForm, access_token: e.target.value })}
+                    className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-white text-sm"
+                    placeholder="ghp_xxxx or glpat-xxxx"
+                    type="password"
+                    autoComplete="off"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">GitHub PAT, GitLab token, or Bitbucket app password. Leave empty for public repos.</p>
+                </div>
+
+                <div>
                   <label className="block text-sm font-medium text-gray-300 mb-2">Copy method</label>
                   <div className="space-y-2">
                     <label className="flex items-center gap-2 cursor-pointer">
@@ -1702,10 +1720,13 @@ export default function InstanceDetailPage() {
                     if (!gitAddonForm.url.trim()) return;
                     setGitAddonAdding(true);
                     try {
-                      const payload: { url: string; branch: string; copy_method?: string; specific_addons?: string[] } = {
+                      const payload: { url: string; branch: string; copy_method?: string; specific_addons?: string[]; access_token?: string } = {
                         url: gitAddonForm.url.trim(),
                         branch: gitAddonForm.branch.trim() || instance?.version || "17.0",
                       };
+                      if (gitAddonForm.access_token.trim()) {
+                        payload.access_token = gitAddonForm.access_token.trim();
+                      }
                       if (gitAddonForm.copy_method === "specific" && gitAddonForm.specific_addons.trim()) {
                         payload.copy_method = "specific";
                         payload.specific_addons = gitAddonForm.specific_addons.split(",").map(s => s.trim()).filter(Boolean);
@@ -1812,6 +1833,7 @@ export default function InstanceDetailPage() {
                                   branch: instance?.version || "17.0",
                                   copy_method: "all",
                                   specific_addons: "",
+                                  access_token: "",
                                 });
                                 setShowAddGitModal(true);
                               }}
