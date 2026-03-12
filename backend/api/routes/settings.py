@@ -313,6 +313,7 @@ async def list_enterprise_packages(
                     "uploaded_at": meta.get("uploaded_at", ""),
                     "size_mb": meta.get("size_mb", 0),
                     "filename": meta.get("filename", ""),
+                    "revision_date": meta.get("revision_date", ""),
                 })
             except Exception:
                 packages.append({
@@ -320,6 +321,7 @@ async def list_enterprise_packages(
                     "uploaded_at": "",
                     "size_mb": 0,
                     "filename": "",
+                    "revision_date": "",
                 })
         else:
             packages.append({
@@ -327,6 +329,7 @@ async def list_enterprise_packages(
                 "uploaded_at": "",
                 "size_mb": 0,
                 "filename": "",
+                "revision_date": "",
             })
     return packages
 
@@ -448,6 +451,12 @@ async def upload_enterprise_package(
     size_mb = round(size_bytes / (1024 * 1024), 2)
     logger.info(f"Enterprise package saved: {file_path} ({size_mb} MB)")
 
+    # Extract revision date from filename (e.g. odoo_19.0+e.20251015.tar.gz → 2025-10-15)
+    revision_date = ""
+    date_match = re.search(r"(\d{4})(\d{2})(\d{2})", fname)
+    if date_match:
+        revision_date = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
+
     # Write meta.json
     uploaded_at = datetime.now(timezone.utc).isoformat()
     meta = {
@@ -455,6 +464,7 @@ async def upload_enterprise_package(
         "filename": fname,
         "size_mb": size_mb,
         "version": version,
+        "revision_date": revision_date,
     }
     (version_dir / "meta.json").write_text(json.dumps(meta, indent=2))
 
@@ -463,6 +473,7 @@ async def upload_enterprise_package(
         "uploaded_at": uploaded_at,
         "size_mb": size_mb,
         "filename": fname,
+        "revision_date": revision_date,
     }
 
 

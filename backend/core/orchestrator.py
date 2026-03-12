@@ -117,6 +117,9 @@ async def deploy_instance(inst: Instance, server: Server, db: AsyncSession) -> N
             },
         }
 
+        # Pass DB instance ID so plugin uses the same ID for prefix/deploy_dir
+        deploy_config["instance_id"] = inst.id
+
         logger.info(f"Deploying {inst.cms_type} instance {inst_name} on {server.name}:{port}")
         cms_instance = await plugin.deploy(server.id, deploy_config)
 
@@ -360,9 +363,26 @@ async def update_instance_settings(inst: Instance, server: Server, db: AsyncSess
                 if not ok:
                     raise RuntimeError("Failed to enable enterprise on instance")
 
-                # Success
+                # Read revision_date from meta.json
+                enterprise_revision = ""
+                try:
+                    import json as _json
+                    meta_path = Path("data/enterprise") / inst_version / "meta.json"
+                    if meta_path.exists():
+                        meta = _json.loads(meta_path.read_text())
+                        enterprise_revision = meta.get("revision_date", "")
+                except Exception:
+                    pass
+
+                # Success — set status AFTER _update_config's refresh, not before
+                await _update_config({
+                    "enterprise": True,
+                    "enterprise_progress": None,
+                    "enterprise_error": None,
+                    "enterprise_revision_date": enterprise_revision,
+                })
                 inst.status = "running"
-                await _update_config({"enterprise": True, "enterprise_progress": None, "enterprise_error": None})
+                await db.commit()
                 logger.info(f"Enterprise enabled for {inst_name}")
 
             except Exception as e:
@@ -371,8 +391,9 @@ async def update_instance_settings(inst: Instance, server: Server, db: AsyncSess
                     await _refresh()
                 except Exception:
                     pass
-                inst.status = "running"
                 await _update_config({"enterprise": False, "enterprise_error": str(e), "enterprise_progress": None})
+                inst.status = "running"
+                await db.commit()
                 return
 
         elif "enterprise" in settings and not settings["enterprise"]:

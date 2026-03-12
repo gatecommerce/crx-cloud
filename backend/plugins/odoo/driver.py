@@ -24,7 +24,10 @@ class OdooPlugin(CMSPlugin):
 
     def _compose_content(self, instance_id: str, config: dict) -> str:
         """Generate docker-compose.yml for an Odoo instance."""
-        prefix = self._instance_prefix(instance_id)
+        # CRITICAL: Use the stored prefix from config if available (set during deploy).
+        # Regenerating from instance_id would create different volume names if the DB
+        # instance ID differs from the plugin's original deploy ID.
+        prefix = config.get("prefix") or self._instance_prefix(instance_id)
         version = config.get("version", "19.0")
         port = config.get("port", 8069)
         workers = config.get("workers", 2)
@@ -271,7 +274,8 @@ class OdooPlugin(CMSPlugin):
 
     async def deploy(self, server_id: str, config: dict) -> CMSInstance:
         """Deploy Odoo via Docker Compose on a VM server."""
-        instance_id = str(uuid.uuid4())
+        # Use the DB instance ID if passed by orchestrator, ensuring prefix consistency
+        instance_id = config.pop("instance_id", None) or str(uuid.uuid4())
         prefix = self._instance_prefix(instance_id)
         version = config.get("version", "19.0")
         port = config.get("port", 8069)
@@ -588,24 +592,36 @@ class OdooPlugin(CMSPlugin):
             # Create base directory
             await self.vm_driver._ssh_exec(server, f"mkdir -p {base_dir}")
 
-            # SCP the package to the server
+            # Upload package via paramiko SFTP (avoids CLI scp key permission issues in Docker)
+            import os
+            import paramiko
+
             ssh_user = server.metadata.get("ssh_user", "root")
             ssh_key = server.metadata.get("ssh_key_path", "")
-            key_opt = f"-i {ssh_key}" if ssh_key else ""
-
-            import subprocess
-            scp_cmd = f"scp {key_opt} -o StrictHostKeyChecking=no {package_path} {ssh_user}@{server.endpoint}:{base_dir}/"
-            logger.info(f"SCP enterprise package to {server.endpoint}:{base_dir}/")
-            proc = await asyncio.to_thread(
-                subprocess.run, scp_cmd, shell=True, capture_output=True, text=True, timeout=600
-            )
-            if proc.returncode != 0:
-                logger.error(f"SCP failed: {proc.stderr}")
-                return False
-
-            # Get filename on server
-            import os
+            local_file = package_path
             remote_file = f"{base_dir}/{os.path.basename(package_path)}"
+
+            def _sftp_upload():
+                client = paramiko.SSHClient()
+                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                connect_kwargs = {
+                    "hostname": server.endpoint,
+                    "username": ssh_user,
+                    "port": server.metadata.get("ssh_port", 22),
+                    "timeout": 30,
+                }
+                if ssh_key:
+                    connect_kwargs["key_filename"] = ssh_key
+                client.connect(**connect_kwargs)
+                try:
+                    sftp = client.open_sftp()
+                    sftp.put(local_file, remote_file)
+                    sftp.close()
+                finally:
+                    client.close()
+
+            logger.info(f"SFTP upload enterprise package to {server.endpoint}:{remote_file}")
+            await asyncio.to_thread(_sftp_upload)
 
             # Extract and find addons directory
             # Odoo enterprise tar.gz structure: odoo-19.0+e.YYYYMMDD/odoo/addons/

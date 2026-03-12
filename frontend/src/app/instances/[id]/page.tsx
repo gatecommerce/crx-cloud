@@ -279,6 +279,9 @@ export default function InstanceDetailPage() {
     if (key === "enterprise" && value) {
       if (!confirm("Enable Enterprise Edition? This will upload addons, restart the instance, and install enterprise modules. The instance will be temporarily unavailable.")) return;
     }
+    if (key === "enterprise" && !value) {
+      if (!confirm("⚠️ ATTENZIONE: Disattivare Enterprise rimuoverà l'accesso ai moduli enterprise (web_enterprise, ecc.) e riavvierà l'istanza.\n\nSe i moduli enterprise sono già installati nel database, Odoo potrebbe non funzionare correttamente.\n\nSei sicuro di voler continuare?")) return;
+    }
 
     setSettingsSaving(true);
     try {
@@ -927,6 +930,7 @@ export default function InstanceDetailPage() {
                               <th className="pb-3 pr-4">Type</th>
                               <th className="pb-3 pr-4">Name</th>
                               <th className="pb-3 pr-4">Branch</th>
+                              <th className="pb-3 pr-4">Revision</th>
                               <th className="pb-3 pr-4">Status</th>
                               <th className="pb-3 text-right">Actions</th>
                             </tr>
@@ -944,6 +948,18 @@ export default function InstanceDetailPage() {
                                   <span className="text-xs px-2 py-1 rounded bg-white/5 text-[var(--muted)] font-mono">
                                     {addon.branch}
                                   </span>
+                                </td>
+                                <td className="py-3 pr-4">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs px-2 py-0.5 rounded bg-[var(--accent)]/10 text-[var(--accent)] font-mono">
+                                      {addon.revision_date || "—"}
+                                    </span>
+                                    {addon.update_available && addon.available_revision_date && (
+                                      <span className="text-xs text-amber-400" title={`New version available: ${addon.available_revision_date}`}>
+                                        → {addon.available_revision_date}
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="py-3 pr-4">
                                   <span className={`text-xs px-2 py-1 rounded-full capitalize ${
@@ -981,16 +997,20 @@ export default function InstanceDetailPage() {
                                           }
                                         }}
                                         disabled={addonUpdating || instance?.status !== "running"}
-                                        className="px-3 py-1.5 text-xs rounded-lg border border-[var(--border)] hover:bg-white/5 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                                        className={`px-3 py-1.5 text-xs rounded-lg border transition-colors disabled:opacity-50 flex items-center gap-1.5 ${
+                                          addon.update_available
+                                            ? "border-amber-500/50 text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 animate-pulse"
+                                            : "border-[var(--border)] hover:bg-white/5"
+                                        }`}
                                       >
                                         {addonUpdating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                                        Update
+                                        {addon.update_available ? "Update Available" : "Update"}
                                       </button>
                                     )}
                                     {addon.can_delete && (
                                       <button
                                         onClick={async () => {
-                                          if (!confirm("Remove Enterprise addons and revert to Community edition? This will restart the instance.")) return;
+                                          if (!confirm("⚠️ ATTENZIONE: Rimuovere Enterprise riporterà l'istanza a Community edition.\n\nSe i moduli enterprise sono installati nel database, Odoo potrebbe non funzionare correttamente.\n\nL'istanza verrà riavviata. Continuare?")) return;
                                           try {
                                             await instancesApi.removeEnterpriseAddons(instanceId);
                                             loadAddons();
@@ -1261,6 +1281,15 @@ export default function InstanceDetailPage() {
                         onChange={(v) => handleSaveSettings("enterprise", v)}
                         disabled={instance?.status === "upgrading" || !enterprisePackages.find((p: any) => p.version === instance?.version)}
                       />
+                      {instance?.config?.enterprise === true && (
+                        <SettingToggle
+                          label="Bypass License Check"
+                          description="Dev mode: extend expiration to 2099 and hide the license warning banner"
+                          checked={instance?.config?.enterprise_bypass_license === true}
+                          onChange={(v) => handleSaveSettings("enterprise_bypass_license", v)}
+                          disabled={instance?.status === "upgrading"}
+                        />
+                      )}
                     </div>
                   </div>
 

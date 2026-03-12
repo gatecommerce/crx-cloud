@@ -797,7 +797,8 @@ function EnterpriseSection() {
                 <thead>
                   <tr className="border-b border-[var(--border)] text-xs text-[var(--muted)]">
                     <th className="text-left px-4 py-3">Version</th>
-                    <th className="text-left px-4 py-3">Revision Date</th>
+                    <th className="text-left px-4 py-3">Package Revision</th>
+                    <th className="text-left px-4 py-3">Uploaded</th>
                     <th className="text-left px-4 py-3">Size</th>
                     <th className="text-right px-4 py-3">Actions</th>
                   </tr>
@@ -809,8 +810,15 @@ function EnterpriseSection() {
                       className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--card-hover)]"
                     >
                       <td className="px-4 py-3 text-sm font-medium">Odoo {pkg.version}</td>
+                      <td className="px-4 py-3 text-sm">
+                        {pkg.revision_date ? (
+                          <span className="px-2 py-0.5 rounded bg-[var(--accent)]/10 text-[var(--accent)] font-mono text-xs">{pkg.revision_date}</span>
+                        ) : (
+                          <span className="text-[var(--muted)]">-</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-sm text-[var(--muted)]">
-                        {formatDate(pkg.revision_date || pkg.uploaded_at)}
+                        {formatDate(pkg.uploaded_at)}
                       </td>
                       <td className="px-4 py-3 text-sm text-[var(--muted)]">
                         {pkg.size_mb ? `${pkg.size_mb} MB` : "-"}

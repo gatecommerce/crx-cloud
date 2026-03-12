@@ -68,6 +68,7 @@ class InstanceSettingsUpdate(BaseModel):
     auto_ssl: bool | None = None
     auto_update: bool | None = None
     enterprise: bool | None = None
+    enterprise_bypass_license: bool | None = None
 
 
 class InstanceDomainUpdate(BaseModel):
@@ -355,6 +356,94 @@ async def _bg_update_settings(instance_id: str, server_id: str, settings: dict):
         await update_instance_settings(inst, server, db, settings)
 
 
+async def _bg_bypass_license(instance_id: str, server_id: str, enable: bool):
+    """Background task: set/unset Odoo enterprise license expiration bypass via JSONRPC."""
+    import json as _json
+    async with async_session() as db:
+        result = await db.execute(select(Instance).where(Instance.id == instance_id))
+        inst = result.scalar_one_or_none()
+        if not inst:
+            return
+        srv_result = await db.execute(select(Server).where(Server.id == server_id))
+        server = srv_result.scalar_one_or_none()
+        if not server:
+            return
+
+        config = inst.config or {}
+        port = config.get("port", 8069)
+        db_name = config.get("db_name", inst.name)
+        admin_password = config.get("admin_password", "admin")
+
+        from core.server_manager import ServerInfo, ServerStatus
+        from core.vm_controller import VMDriver
+        vm = VMDriver()
+        server_info = ServerInfo(
+            id=server.id, name=server.name, server_type="vm",
+            provider=server.provider or "", status=ServerStatus.ONLINE,
+            endpoint=server.endpoint,
+            metadata={"ssh_user": server.ssh_user or "root", "ssh_key_path": server.ssh_key_path or ""},
+        )
+
+        try:
+            # Authenticate as admin
+            auth_payload = _json.dumps({
+                "jsonrpc": "2.0", "id": 1, "method": "call",
+                "params": {"service": "common", "method": "authenticate",
+                           "args": [db_name, "admin", admin_password, {}]}
+            })
+            auth_result = await vm._ssh_exec(
+                server_info,
+                f"curl -s -X POST http://localhost:{port}/jsonrpc "
+                f"-H 'Content-Type: application/json' "
+                f"-d '{auth_payload}'"
+            )
+            uid = _json.loads(auth_result).get("result")
+            if not uid:
+                logging.getLogger(__name__).warning(f"Cannot auth for license bypass on {inst.name}")
+                return
+
+            # Set expiration date: far future if enabling bypass, empty if disabling
+            expiry_date = "2099-12-31 23:59:59" if enable else ""
+
+            set_payload = _json.dumps({
+                "jsonrpc": "2.0", "id": 2, "method": "call",
+                "params": {
+                    "service": "object", "method": "execute_kw",
+                    "args": [db_name, uid, admin_password, "ir.config_parameter", "set_param",
+                             ["database.expiration_date", expiry_date]]
+                }
+            })
+            await vm._ssh_exec(
+                server_info,
+                f"curl -s -X POST http://localhost:{port}/jsonrpc "
+                f"-H 'Content-Type: application/json' "
+                f"-d '{set_payload}'"
+            )
+
+            # Also set expiration_reason to avoid "renewal required" banner
+            reason = "" if enable else ""
+            reason_payload = _json.dumps({
+                "jsonrpc": "2.0", "id": 3, "method": "call",
+                "params": {
+                    "service": "object", "method": "execute_kw",
+                    "args": [db_name, uid, admin_password, "ir.config_parameter", "set_param",
+                             ["database.expiration_reason", reason]]
+                }
+            })
+            await vm._ssh_exec(
+                server_info,
+                f"curl -s -X POST http://localhost:{port}/jsonrpc "
+                f"-H 'Content-Type: application/json' "
+                f"-d '{reason_payload}'"
+            )
+
+            logging.getLogger(__name__).info(
+                f"Enterprise license bypass {'enabled' if enable else 'disabled'} for {inst.name}"
+            )
+        except Exception as e:
+            logging.getLogger(__name__).error(f"License bypass failed for {inst.name}: {e}")
+
+
 async def _bg_update_domain(instance_id: str, server_id: str, domain_data: dict):
     """Background task: apply domain changes via orchestrator."""
     async with async_session() as db:
@@ -398,14 +487,32 @@ async def update_settings(
     if body.auto_update is not None:
         settings_changed["auto_update"] = body.auto_update
 
+    if body.enterprise_bypass_license is not None:
+        if not (inst.config or {}).get("enterprise"):
+            raise HTTPException(status_code=400, detail="Enterprise must be enabled first")
+        settings_changed["enterprise_bypass_license"] = body.enterprise_bypass_license
+
     # Merge settings into config (don't replace)
     inst.config = {**(inst.config or {}), **settings_changed}
+
+    # Enterprise activation is a long-running operation — set status to "upgrading"
+    # BEFORE returning, so the frontend immediately starts polling
+    if body.enterprise is True:
+        inst.status = "upgrading"
+        inst.config = {**(inst.config or {}), "enterprise_progress": "Starting enterprise activation..."}
+
     await db.commit()
     await db.refresh(inst)
 
     # Trigger orchestrator for enterprise or auto_ssl changes
     if body.enterprise is not None or body.auto_ssl is not None:
         background_tasks.add_task(_bg_update_settings, inst.id, server.id, settings_changed)
+
+    # Bypass license is a quick JSONRPC call, no background task needed
+    if body.enterprise_bypass_license is not None:
+        background_tasks.add_task(
+            _bg_bypass_license, inst.id, server.id, body.enterprise_bypass_license
+        )
 
     return _to_response(inst)
 
@@ -473,13 +580,34 @@ async def list_addons(
 
     # Enterprise addon
     if config.get("enterprise"):
+        is_upgrading = inst.status == "upgrading"
+
+        # Get installed revision date from instance config
+        installed_revision = config.get("enterprise_revision_date", "")
+
+        # Get available revision date from global enterprise package
+        available_revision = ""
+        try:
+            meta_path = Path(__file__).resolve().parents[2] / "data" / "enterprise" / inst.version / "meta.json"
+            if meta_path.exists():
+                import json as _json
+                meta = _json.loads(meta_path.read_text())
+                available_revision = meta.get("revision_date", "")
+        except Exception:
+            pass
+
+        update_available = bool(available_revision and installed_revision and available_revision > installed_revision)
+
         addons.append({
             "type": "file",
             "name": "Odoo Enterprise",
             "branch": inst.version,
-            "status": "installed",
-            "can_update": True,
-            "can_delete": True,
+            "status": "installing" if is_upgrading else "installed",
+            "can_update": not is_upgrading,
+            "can_delete": not is_upgrading,
+            "revision_date": installed_revision,
+            "available_revision_date": available_revision,
+            "update_available": update_available,
         })
 
     return addons
