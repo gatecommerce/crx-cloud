@@ -271,6 +271,152 @@ async def health_check_instance(inst: Instance, server: Server) -> dict:
     return await plugin.health_check(cms)
 
 
+async def update_instance_settings(inst: Instance, server: Server, db: AsyncSession, settings: dict) -> None:
+    """Apply settings changes (enterprise, auto_ssl) to a running instance.
+
+    Called as a background task after the API returns the updated instance.
+    """
+    plugin = get_plugin(inst.cms_type)
+    if not plugin:
+        logger.error(f"No plugin for {inst.cms_type} — cannot update settings")
+        return
+
+    try:
+        # Enterprise edition toggle
+        if "enterprise" in settings:
+            cms = _db_to_cms_instance(inst, server)
+            await plugin.configure(cms, {"enterprise": settings["enterprise"]})
+            logger.info(f"Enterprise {'enabled' if settings['enterprise'] else 'disabled'} for {inst.name}")
+
+        # SSL toggle
+        if "auto_ssl" in settings:
+            if inst.domain:
+                port = (inst.config or {}).get("port", 8069)
+                if settings["auto_ssl"]:
+                    nginx_ok = await setup_nginx(
+                        host=server.endpoint,
+                        ssh_user=server.ssh_user or "root",
+                        ssh_key_path=server.ssh_key_path or "",
+                        config=NginxConfig(
+                            domain=inst.domain,
+                            upstream_port=port,
+                            instance_name=inst.name,
+                            ssl=True,
+                        ),
+                    )
+                    if nginx_ok:
+                        inst.url = f"https://{inst.domain}"
+                        logger.info(f"SSL enabled for {inst.domain}")
+                    else:
+                        logger.warning(f"SSL setup failed for {inst.domain}")
+                else:
+                    # Reconfigure nginx without SSL
+                    nginx_ok = await setup_nginx(
+                        host=server.endpoint,
+                        ssh_user=server.ssh_user or "root",
+                        ssh_key_path=server.ssh_key_path or "",
+                        config=NginxConfig(
+                            domain=inst.domain,
+                            upstream_port=port,
+                            instance_name=inst.name,
+                            ssl=False,
+                        ),
+                    )
+                    if nginx_ok:
+                        inst.url = f"http://{inst.domain}"
+                        logger.info(f"SSL disabled for {inst.domain}")
+
+        # Merge settings into config
+        inst.config = {**(inst.config or {}), **settings}
+        await db.commit()
+
+    except Exception as e:
+        logger.error(f"Failed to update settings for {inst.name}: {e}")
+        inst.config = {**(inst.config or {}), "settings_error": str(e)}
+        await db.commit()
+
+
+async def update_instance_domain(inst: Instance, server: Server, db: AsyncSession, domain_data: dict) -> None:
+    """Apply domain changes (domain, aliases, http_redirect) to a running instance.
+
+    Called as a background task after the API returns the updated instance.
+    """
+    try:
+        old_domain = inst.domain
+        new_domain = domain_data.get("domain") or inst.domain
+        aliases = domain_data.get("aliases", [])
+        port = (inst.config or {}).get("port", 8069)
+
+        # Remove old DNS + Nginx if domain changed
+        if old_domain and new_domain != old_domain:
+            try:
+                old_subdomain = old_domain.replace(".site.crx.team", "")
+                await remove_subdomain(old_subdomain)
+                logger.info(f"Removed DNS for old domain: {old_domain}")
+            except Exception as e:
+                logger.warning(f"DNS cleanup failed for {old_domain}: {e}")
+
+            try:
+                await remove_nginx(
+                    host=server.endpoint,
+                    ssh_user=server.ssh_user or "root",
+                    ssh_key_path=server.ssh_key_path or "",
+                    instance_name=inst.name,
+                )
+                logger.info(f"Removed Nginx for old domain: {old_domain}")
+            except Exception as e:
+                logger.warning(f"Nginx cleanup failed for {old_domain}: {e}")
+
+        # Setup new DNS + Nginx
+        if new_domain:
+            try:
+                subdomain = new_domain.replace(".site.crx.team", "")
+                await create_subdomain(subdomain, server.endpoint)
+                logger.info(f"DNS record created: {new_domain} -> {server.endpoint}")
+            except Exception as e:
+                logger.warning(f"DNS creation failed for {new_domain}: {e}")
+
+            ssl_enabled = (inst.config or {}).get("auto_ssl", True)
+            try:
+                nginx_ok = await setup_nginx(
+                    host=server.endpoint,
+                    ssh_user=server.ssh_user or "root",
+                    ssh_key_path=server.ssh_key_path or "",
+                    config=NginxConfig(
+                        domain=new_domain,
+                        upstream_port=port,
+                        instance_name=inst.name,
+                        ssl=ssl_enabled,
+                        aliases=aliases,
+                    ),
+                )
+                if nginx_ok:
+                    scheme = "https" if ssl_enabled else "http"
+                    inst.url = f"{scheme}://{new_domain}"
+                    logger.info(f"Nginx configured for {new_domain} (aliases: {aliases})")
+                else:
+                    inst.url = f"http://{new_domain}:{port}"
+                    logger.warning(f"Nginx failed for {new_domain}, using direct port")
+            except Exception as e:
+                inst.url = f"http://{new_domain}:{port}"
+                logger.warning(f"Nginx setup error for {new_domain}: {e}")
+
+        # Update instance record
+        inst.domain = new_domain
+        inst.config = {
+            **(inst.config or {}),
+            "aliases": aliases,
+            "http_redirect": domain_data.get("http_redirect", True),
+        }
+        await db.commit()
+        logger.info(f"Domain updated for {inst.name}: {old_domain} -> {new_domain}")
+
+    except Exception as e:
+        logger.error(f"Failed to update domain for {inst.name}: {e}")
+        inst.config = {**(inst.config or {}), "domain_error": str(e)}
+        await db.commit()
+
+
 async def get_instance_logs(inst: Instance, server: Server, lines: int = 100) -> str:
     """Get recent logs from an instance container."""
     plugin = get_plugin(inst.cms_type)

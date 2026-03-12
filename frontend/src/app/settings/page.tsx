@@ -9,7 +9,7 @@ import { settingsApi } from "@/lib/api";
 import {
   ChevronDown, ChevronRight, Plus, Trash2, Search, Copy,
   CheckCircle, Cloud, HardDrive, Key, UserCog, AlertTriangle,
-  Shield, ToggleLeft, ToggleRight, Loader2
+  Shield, ToggleLeft, ToggleRight, Loader2, Upload
 } from "lucide-react";
 
 // ─── Provider icons/labels ───────────────────────────────────────────────────
@@ -700,6 +700,189 @@ function AccountSection() {
   );
 }
 
+// ─── Enterprise Edition Section ──────────────────────────────────────────────
+function EnterpriseSection() {
+  const [packages, setPackages] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [uploadVersion, setUploadVersion] = useState("18.0");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [error, setError] = useState("");
+
+  const loadPackages = useCallback(async () => {
+    try {
+      const data = await settingsApi.listEnterprise().catch(() => []);
+      setPackages(data);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPackages();
+  }, [loadPackages]);
+
+  async function handleUpload(e: React.FormEvent) {
+    e.preventDefault();
+    if (!uploadFile) return;
+    setUploading(true);
+    setError("");
+    try {
+      await settingsApi.uploadEnterprise(uploadVersion, uploadFile);
+      setUploadFile(null);
+      loadPackages();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleDelete(version: string) {
+    if (!confirm(`Delete Enterprise package for Odoo ${version}?`)) return;
+    try {
+      await settingsApi.deleteEnterprise(version);
+      loadPackages();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  }
+
+  function formatSize(bytes: number): string {
+    if (!bytes) return "-";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  }
+
+  function formatDate(iso: string) {
+    if (!iso) return "-";
+    return new Date(iso).toLocaleDateString("en-US", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  }
+
+  const inputClass =
+    "w-full bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--accent)]";
+
+  return (
+    <div>
+      <p className="text-sm text-[var(--muted)] mb-4">
+        Upload Odoo Enterprise packages to enable Enterprise Edition on your instances.
+      </p>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <div className="w-5 h-5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : (
+        <>
+          {packages.length > 0 && (
+            <div className="overflow-x-auto mb-4">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-[var(--border)] text-xs text-[var(--muted)]">
+                    <th className="text-left px-4 py-3">Version</th>
+                    <th className="text-left px-4 py-3">Revision Date</th>
+                    <th className="text-left px-4 py-3">Size</th>
+                    <th className="text-right px-4 py-3">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {packages.map((pkg) => (
+                    <tr
+                      key={pkg.version}
+                      className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--card-hover)]"
+                    >
+                      <td className="px-4 py-3 text-sm font-medium">Odoo {pkg.version}</td>
+                      <td className="px-4 py-3 text-sm text-[var(--muted)]">
+                        {formatDate(pkg.revision_date || pkg.uploaded_at)}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-[var(--muted)]">
+                        {formatSize(pkg.size)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={() => handleDelete(pkg.version)}
+                          className="text-[var(--muted)] hover:text-[var(--danger)] transition-colors"
+                          title="Delete package"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {packages.length === 0 && (
+            <p className="text-sm text-[var(--muted)] mb-4">
+              No Enterprise packages uploaded yet. Upload one to enable Enterprise Edition on your instances.
+            </p>
+          )}
+
+          <form
+            onSubmit={handleUpload}
+            className="bg-[var(--background)] border border-[var(--border)] rounded-lg p-4 space-y-3"
+          >
+            <h4 className="text-sm font-semibold mb-2">Upload Enterprise Package</h4>
+
+            {error && (
+              <div className="text-sm text-[var(--danger)] bg-[var(--danger)]/10 rounded-lg px-3 py-2">
+                {error}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-[var(--muted)] mb-1">Odoo Version</label>
+                <select
+                  value={uploadVersion}
+                  onChange={(e) => setUploadVersion(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="17.0">17.0</option>
+                  <option value="18.0">18.0</option>
+                  <option value="19.0">19.0</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-[var(--muted)] mb-1">Package file (.tar.gz / .zip)</label>
+                <input
+                  type="file"
+                  accept=".tar.gz,.zip,.tgz"
+                  onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                  className={`${inputClass} file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-[var(--accent)]/10 file:text-[var(--accent)]`}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-1">
+              <button
+                type="submit"
+                disabled={uploading || !uploadFile}
+                className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-50 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                {uploading ? (
+                  <><Loader2 size={14} className="animate-spin" /> Uploading...</>
+                ) : (
+                  <><Upload size={14} /> Upload</>
+                )}
+              </button>
+            </div>
+          </form>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Small helper components ─────────────────────────────────────────────────
 function InfoCard({ label, value }: { label: string; value: string | number }) {
   return (
@@ -741,6 +924,10 @@ export default function SettingsPage() {
               <div className="space-y-4">
                 <AccordionSection title="Backup Storages" icon={HardDrive} defaultOpen>
                   <BackupStoragesSection />
+                </AccordionSection>
+
+                <AccordionSection title="Enterprise Edition" icon={Shield}>
+                  <EnterpriseSection />
                 </AccordionSection>
 
                 <AccordionSection title="API Keys" icon={Key}>

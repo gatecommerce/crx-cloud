@@ -35,6 +35,7 @@ class OdooPlugin(CMSPlugin):
         db_name = config.get("db_name", instance_name)
         language = config.get("language", "en_US")
         use_external_db = config.get("use_external_db", False)
+        enterprise = config.get("enterprise", False)
 
         # External DB connection params
         ext_db_host = config.get("external_db_host", "")
@@ -78,6 +79,9 @@ class OdooPlugin(CMSPlugin):
             "--proxy-mode",
         ]
 
+        if enterprise:
+            cmd_parts.append("--addons-path=/mnt/extra-addons,/mnt/enterprise-addons")
+
         # Odoo config file (admin_passwd can only be set via conf in Odoo 17+)
         odoo_conf = (
             f"[options]\n"
@@ -111,6 +115,9 @@ class OdooPlugin(CMSPlugin):
             f"      - {prefix}-addons:/mnt/extra-addons",
             f"      - ./odoo.conf:/etc/odoo/odoo.conf:ro",
         ]
+
+        if enterprise:
+            lines.append(f"      - /opt/crx-cloud/enterprise/{version}/enterprise:/mnt/enterprise-addons:ro")
 
         if not use_external_db:
             lines += [
@@ -523,4 +530,72 @@ class OdooPlugin(CMSPlugin):
             return True
         except Exception as e:
             logger.error(f"Failed to remove {instance.id}: {e}")
+            return False
+
+    async def update_compose(self, instance: CMSInstance, new_config: dict) -> bool:
+        """Regenerate docker-compose.yml and restart with new config."""
+        try:
+            deploy_dir = instance.config.get("deploy_dir", "")
+            endpoint = instance.config.get("endpoint", "")
+            ssh_meta = instance.config.get("ssh_metadata", {})
+            server = self._server_info(instance.server_id, endpoint, ssh_meta)
+
+            # Merge new_config into existing instance config
+            merged_config = {**instance.config, **new_config}
+            compose, odoo_conf = self._compose_content(instance.id, merged_config)
+
+            # Write updated docker-compose.yml
+            await self.vm_driver._ssh_exec(
+                server,
+                f"cat > {deploy_dir}/docker-compose.yml << 'COMPOSEOF'\n{compose}COMPOSEOF"
+            )
+            # Write updated odoo.conf
+            await self.vm_driver._ssh_exec(
+                server,
+                f"cat > {deploy_dir}/odoo.conf << 'CONFEOF'\n{odoo_conf}CONFEOF"
+            )
+
+            # Apply changes — Docker recreates only changed services
+            await self.vm_driver._ssh_exec(
+                server,
+                f"cd {deploy_dir} && docker compose up -d"
+            )
+
+            logger.info(f"Updated compose for {instance.id} with config: {list(new_config.keys())}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to update compose for {instance.id}: {e}")
+            return False
+
+    async def sync_enterprise_addons(self, server: ServerInfo, version: str, local_path: str) -> bool:
+        """Sync enterprise addons to remote server.
+
+        Ensures the enterprise addons directory structure exists on the remote.
+        In production, enterprise packages are uploaded via SCP; this method
+        creates the target directory and verifies readiness.
+        """
+        target_dir = f"/opt/crx-cloud/enterprise/{version}/enterprise"
+        try:
+            # Create target directory if it doesn't exist
+            result = await self.vm_driver._ssh_exec(
+                server,
+                f"mkdir -p {target_dir} && echo OK"
+            )
+            if "OK" not in result:
+                logger.error(f"Failed to create enterprise directory: {result}")
+                return False
+
+            # Verify directory exists and is accessible
+            result = await self.vm_driver._ssh_exec(
+                server,
+                f"test -d {target_dir} && echo EXISTS || echo MISSING"
+            )
+            if "EXISTS" not in result:
+                logger.error(f"Enterprise directory not found after creation: {target_dir}")
+                return False
+
+            logger.info(f"Enterprise addons directory ready: {target_dir}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to sync enterprise addons for v{version}: {e}")
             return False

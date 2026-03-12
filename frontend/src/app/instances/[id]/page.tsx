@@ -6,7 +6,7 @@ import { AuthGuard } from "@/components/AuthGuard";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { StatsBar } from "@/components/dashboard/StatsBar";
 import { VitoChat } from "@/components/dashboard/VitoChat";
-import { instancesApi, backupsApi, serversApi } from "@/lib/api";
+import { instancesApi, backupsApi, serversApi, settingsApi } from "@/lib/api";
 import {
   ArrowLeft, Play, Square, RotateCcw, Trash2, ExternalLink,
   Cpu, MemoryStick, Users, Heart, ScrollText, Database,
@@ -43,6 +43,26 @@ const statusBg: Record<string, string> = {
   deploying: "bg-[var(--warning)]/10",
   error: "bg-[var(--danger)]/10",
 };
+
+function SettingToggle({ label, description, checked, onChange, disabled = false }: {
+  label: string; description: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean;
+}) {
+  return (
+    <div className={`flex items-center justify-between py-3 border-b border-white/5 last:border-0 ${disabled ? "opacity-50" : ""}`}>
+      <div>
+        <div className="text-white font-medium">{label}</div>
+        <div className="text-gray-400 text-sm mt-0.5">{description}</div>
+      </div>
+      <button
+        onClick={() => !disabled && onChange(!checked)}
+        disabled={disabled}
+        className={`relative w-11 h-6 rounded-full transition-colors ${checked ? "bg-emerald-500" : "bg-gray-600"} ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}
+      >
+        <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${checked ? "translate-x-5" : ""}`} />
+      </button>
+    </div>
+  );
+}
 
 export default function InstanceDetailPage() {
   const params = useParams();
@@ -94,6 +114,10 @@ export default function InstanceDetailPage() {
     notify_on_error: true,
     notify_on_backup: false,
   });
+  const [showDomainModal, setShowDomainModal] = useState(false);
+  const [domainForm, setDomainForm] = useState({ domain: "", aliases: [] as string[], http_redirect: true });
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [enterprisePackages, setEnterprisePackages] = useState<any[]>([]);
 
   const loadInstance = useCallback(async () => {
     try {
@@ -132,7 +156,8 @@ export default function InstanceDetailPage() {
   const loadLogs = useCallback(async () => {
     try {
       const data = await instancesApi.logs(instanceId, logLines);
-      setLogs(data.logs || []);
+      const raw = data.logs || "";
+      setLogs(typeof raw === "string" ? raw.split("\n").filter(Boolean) : raw);
     } catch {
       setLogs(["Failed to load logs"]);
     }
@@ -140,6 +165,7 @@ export default function InstanceDetailPage() {
 
   useEffect(() => {
     loadInstance();
+    try { settingsApi.listEnterprise().then(setEnterprisePackages).catch(() => {}); } catch {}
   }, [loadInstance]);
 
   useEffect(() => {
@@ -235,6 +261,28 @@ export default function InstanceDetailPage() {
       setConfigSaving(false);
     }
   }
+
+  const handleSaveSettings = async (key: string, value: boolean) => {
+    setSettingsSaving(true);
+    try {
+      await instancesApi.updateSettings(instanceId, { [key]: value });
+      await loadInstance();
+    } catch (e: any) {
+      alert(e.message || "Failed to save settings");
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const handleSaveDomain = async () => {
+    try {
+      await instancesApi.updateDomain(instanceId, domainForm);
+      setShowDomainModal(false);
+      await loadInstance();
+    } catch (e: any) {
+      alert(e.message || "Failed to save domain");
+    }
+  };
 
   // Helper: format uptime
   function formatUptime(createdAt: string): string {
@@ -1027,74 +1075,50 @@ export default function InstanceDetailPage() {
 
               {/* ========== SETTINGS TAB ========== */}
               {activeTab === "settings" && (
-                <div className="space-y-4">
-                  {/* Auto-backup */}
-                  <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
-                    <h3 className="text-sm font-semibold mb-4">Backup Settings</h3>
-                    <div className="space-y-4 max-w-lg">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <label className="text-sm font-medium block">Automatic Backups</label>
-                          <p className="text-xs text-[var(--muted)]">Automatically back up instance on a schedule.</p>
-                        </div>
-                        <button
-                          onClick={() => setSettingsForm(f => ({ ...f, auto_backup: !f.auto_backup }))}
-                          className={`relative w-11 h-6 rounded-full transition-colors ${settingsForm.auto_backup ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`}
-                        >
-                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${settingsForm.auto_backup ? "translate-x-5" : ""}`} />
-                        </button>
-                      </div>
-                      {settingsForm.auto_backup && (
-                        <div>
-                          <label className="text-xs text-[var(--muted)] mb-1.5 block">Backup Schedule</label>
-                          <select
-                            value={settingsForm.backup_schedule}
-                            onChange={(e) => setSettingsForm(f => ({ ...f, backup_schedule: e.target.value }))}
-                            className="w-full text-sm bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2"
-                          >
-                            <option value="daily">Daily at 02:00</option>
-                            <option value="weekly">Weekly (Sunday 02:00)</option>
-                            <option value="monthly">Monthly (1st at 02:00)</option>
-                          </select>
-                        </div>
+                <div className="space-y-6">
+                  {/* Domain Settings Card */}
+                  <div className="bg-[var(--card)] border border-white/10 rounded-xl p-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                        <Globe className="w-5 h-5 text-blue-400" />
+                        Domain Settings
+                      </h3>
+                      <button onClick={() => { setDomainForm({ domain: instance?.domain || "", aliases: instance?.config?.aliases || [], http_redirect: instance?.config?.http_redirect ?? true }); setShowDomainModal(true); }}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm">
+                        Edit Domain
+                      </button>
+                    </div>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between"><span className="text-gray-400">Primary Domain</span><span className="text-white">{instance?.domain || "\u2014"}</span></div>
+                      {instance?.config?.aliases?.length > 0 && (
+                        <div className="flex justify-between"><span className="text-gray-400">Aliases</span><span className="text-white">{instance.config.aliases.join(", ")}</span></div>
                       )}
+                      <div className="flex justify-between"><span className="text-gray-400">HTTPS Redirect</span><span className="text-white">{instance?.config?.http_redirect !== false ? "Enabled" : "Disabled"}</span></div>
+                    </div>
+                  </div>
+
+                  {/* Instance Settings Card */}
+                  <div className="bg-[var(--card)] border border-white/10 rounded-xl p-6">
+                    <h3 className="text-lg font-semibold text-white mb-4">Instance Settings</h3>
+                    <div className="space-y-4">
+                      <SettingToggle label="Auto SSL" description="Automatically provision and renew Let's Encrypt SSL certificates" checked={instance?.config?.auto_ssl !== false} onChange={(v) => handleSaveSettings("auto_ssl", v)} />
+                      <SettingToggle label="Auto Update Odoo" description="Automatically apply minor version updates when available" checked={instance?.config?.auto_update === true} onChange={(v) => handleSaveSettings("auto_update", v)} />
+                      <SettingToggle
+                        label="Enterprise Edition"
+                        description={enterprisePackages.find((p: any) => p.version === instance?.version) ? "Enable Odoo Enterprise features for this instance" : `Upload Enterprise package for Odoo ${instance?.version} in Settings to enable`}
+                        checked={instance?.config?.enterprise === true}
+                        onChange={(v) => handleSaveSettings("enterprise", v)}
+                        disabled={!enterprisePackages.find((p: any) => p.version === instance?.version)}
+                      />
                     </div>
                   </div>
 
                   {/* Notifications */}
-                  <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
-                    <h3 className="text-sm font-semibold mb-4">Notifications</h3>
-                    <div className="space-y-4 max-w-lg">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <AlertTriangle size={16} className="text-[var(--danger)]" />
-                          <div>
-                            <label className="text-sm font-medium block">Error Notifications</label>
-                            <p className="text-xs text-[var(--muted)]">Receive alerts when the instance encounters errors.</p>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => setSettingsForm(f => ({ ...f, notify_on_error: !f.notify_on_error }))}
-                          className={`relative w-11 h-6 rounded-full transition-colors ${settingsForm.notify_on_error ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`}
-                        >
-                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${settingsForm.notify_on_error ? "translate-x-5" : ""}`} />
-                        </button>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <Database size={16} className="text-[var(--accent)]" />
-                          <div>
-                            <label className="text-sm font-medium block">Backup Notifications</label>
-                            <p className="text-xs text-[var(--muted)]">Get notified when backups complete successfully.</p>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => setSettingsForm(f => ({ ...f, notify_on_backup: !f.notify_on_backup }))}
-                          className={`relative w-11 h-6 rounded-full transition-colors ${settingsForm.notify_on_backup ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`}
-                        >
-                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${settingsForm.notify_on_backup ? "translate-x-5" : ""}`} />
-                        </button>
-                      </div>
+                  <div className="bg-[var(--card)] border border-white/10 rounded-xl p-6">
+                    <h3 className="text-lg font-semibold text-white mb-4">Notifications</h3>
+                    <div className="space-y-4">
+                      <SettingToggle label="Error Notifications" description="Receive alerts when the instance encounters errors" checked={settingsForm.notify_on_error} onChange={(v) => setSettingsForm(f => ({ ...f, notify_on_error: v }))} />
+                      <SettingToggle label="Backup Notifications" description="Get notified when backups complete successfully" checked={settingsForm.notify_on_backup} onChange={(v) => setSettingsForm(f => ({ ...f, notify_on_backup: v }))} />
                     </div>
                   </div>
 
@@ -1122,6 +1146,58 @@ export default function InstanceDetailPage() {
           </main>
           <VitoChat />
         </div>
+
+        {/* Domain Settings Modal */}
+        {showDomainModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="bg-[var(--card)] border border-white/10 rounded-2xl p-6 w-full max-w-lg mx-4">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold text-white">Domain Settings</h3>
+                <button onClick={() => setShowDomainModal(false)} className="text-gray-400 hover:text-white">&#x2715;</button>
+              </div>
+
+              {/* Primary Domain */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-300 mb-1">Domain name</label>
+                <input value={domainForm.domain} onChange={e => setDomainForm({...domainForm, domain: e.target.value})}
+                  className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-white" placeholder="example.com" />
+                <p className="text-xs text-gray-500 mt-1">
+                  Make sure you have created a DNS A record pointing to <span className="text-amber-400 font-mono">{instance?.config?.endpoint || instance?.url?.replace(/https?:\/\//, "").split(":")[0]}</span>
+                </p>
+              </div>
+
+              {/* Domain Aliases */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-300 mb-1">Domain aliases</label>
+                {domainForm.aliases.map((alias, i) => (
+                  <div key={i} className="flex gap-2 mb-2">
+                    <input value={alias} onChange={e => { const a = [...domainForm.aliases]; a[i] = e.target.value; setDomainForm({...domainForm, aliases: a}); }}
+                      className="flex-1 px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-white text-sm" />
+                    <button onClick={() => setDomainForm({...domainForm, aliases: domainForm.aliases.filter((_, j) => j !== i)})}
+                      className="px-3 py-2 bg-red-500/20 text-red-400 rounded-lg text-sm hover:bg-red-500/30">Remove</button>
+                  </div>
+                ))}
+                <button onClick={() => setDomainForm({...domainForm, aliases: [...domainForm.aliases, ""]})}
+                  className="text-blue-400 text-sm hover:text-blue-300">+ Add additional domain</button>
+              </div>
+
+              {/* HTTP Redirect Toggle */}
+              <div className="flex items-center justify-between mb-6 py-3 border-t border-white/10">
+                <span className="text-white text-sm">Redirect all HTTP requests to HTTPS</span>
+                <button onClick={() => setDomainForm({...domainForm, http_redirect: !domainForm.http_redirect})}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${domainForm.http_redirect ? "bg-emerald-500" : "bg-gray-600"}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${domainForm.http_redirect ? "translate-x-5" : ""}`} />
+                </button>
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-end gap-3">
+                <button onClick={() => setShowDomainModal(false)} className="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
+                <button onClick={handleSaveDomain} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg">Save</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </AuthGuard>
   );

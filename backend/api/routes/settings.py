@@ -1,9 +1,16 @@
-"""Settings management — API Keys, Backup Storage, Account."""
+"""Settings management — API Keys, Backup Storage, Account, Enterprise Packages."""
 
 import hashlib
+import json
+import os
 import secrets
+import shutil
+import zipfile
+import tarfile
+from datetime import datetime, timezone
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from sqlalchemy import select, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +21,10 @@ from api.models.instance import Instance
 from api.models.backup import Backup
 from core.auth import get_current_user
 from core.database import get_db
+
+from loguru import logger
+
+ENTERPRISE_DIR = Path(__file__).resolve().parents[2] / "data" / "enterprise"
 
 router = APIRouter()
 
@@ -279,3 +290,112 @@ async def get_account(
         backups_count=backups_q.scalar() or 0,
         servers_count=servers_q.scalar() or 0,
     )
+
+
+# --- Enterprise Packages ---
+
+@router.get("/enterprise")
+async def list_enterprise_packages(
+    user: dict = Depends(get_current_user),
+):
+    """List available enterprise packages per version."""
+    ENTERPRISE_DIR.mkdir(parents=True, exist_ok=True)
+    packages = []
+    for version_dir in sorted(ENTERPRISE_DIR.iterdir()):
+        if not version_dir.is_dir():
+            continue
+        meta_path = version_dir / "meta.json"
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+                packages.append({
+                    "version": version_dir.name,
+                    "uploaded_at": meta.get("uploaded_at", ""),
+                    "size_mb": meta.get("size_mb", 0),
+                    "filename": meta.get("filename", ""),
+                })
+            except Exception:
+                packages.append({
+                    "version": version_dir.name,
+                    "uploaded_at": "",
+                    "size_mb": 0,
+                    "filename": "",
+                })
+        else:
+            packages.append({
+                "version": version_dir.name,
+                "uploaded_at": "",
+                "size_mb": 0,
+                "filename": "",
+            })
+    return packages
+
+
+@router.post("/enterprise/upload")
+async def upload_enterprise_package(
+    version: str = Form(...),
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+):
+    """Upload an enterprise package for a specific Odoo version."""
+    valid_versions = ["17.0", "18.0", "19.0"]
+    if version not in valid_versions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid version '{version}'. Must be one of: {', '.join(valid_versions)}",
+        )
+
+    version_dir = ENTERPRISE_DIR / version
+    version_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save uploaded file
+    file_path = version_dir / file.filename
+    contents = await file.read()
+    file_path.write_bytes(contents)
+    size_mb = round(len(contents) / (1024 * 1024), 2)
+
+    logger.info(f"Enterprise package uploaded: {file.filename} ({size_mb} MB) for version {version}")
+
+    # Extract if zip or tar.gz
+    try:
+        if file.filename.endswith(".zip"):
+            with zipfile.ZipFile(file_path, "r") as zf:
+                zf.extractall(version_dir)
+            logger.info(f"Extracted zip: {file.filename}")
+        elif file.filename.endswith(".tar.gz") or file.filename.endswith(".tgz"):
+            with tarfile.open(file_path, "r:gz") as tf:
+                tf.extractall(version_dir)
+            logger.info(f"Extracted tar.gz: {file.filename}")
+    except Exception as e:
+        logger.warning(f"Extraction failed for {file.filename}: {e}")
+
+    # Write meta.json
+    uploaded_at = datetime.now(timezone.utc).isoformat()
+    meta = {
+        "uploaded_at": uploaded_at,
+        "filename": file.filename,
+        "size_mb": size_mb,
+    }
+    (version_dir / "meta.json").write_text(json.dumps(meta, indent=2))
+
+    return {
+        "version": version,
+        "uploaded_at": uploaded_at,
+        "size_mb": size_mb,
+        "filename": file.filename,
+    }
+
+
+@router.delete("/enterprise/{version}")
+async def delete_enterprise_package(
+    version: str,
+    user: dict = Depends(get_current_user),
+):
+    """Remove enterprise package for a specific version."""
+    version_dir = ENTERPRISE_DIR / version
+    if not version_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Enterprise package for version {version} not found")
+
+    shutil.rmtree(version_dir)
+    logger.info(f"Enterprise package removed for version {version}")
+    return {"detail": f"Enterprise package for version {version} removed"}

@@ -3,6 +3,7 @@
 import logging
 import re
 import secrets
+from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -22,6 +23,8 @@ from core.orchestrator import (
     health_check_instance,
     get_instance_logs,
     get_plugin,
+    update_instance_settings,
+    update_instance_domain,
 )
 
 try:
@@ -59,6 +62,18 @@ class InstanceCreate(BaseModel):
     edition: str = "community"
     demo_data: bool = False
     auto_domain: bool = True
+
+
+class InstanceSettingsUpdate(BaseModel):
+    auto_ssl: bool | None = None
+    auto_update: bool | None = None
+    enterprise: bool | None = None
+
+
+class InstanceDomainUpdate(BaseModel):
+    domain: str | None = None
+    aliases: list[str] = []
+    http_redirect: bool = True
 
 
 class InstanceResponse(BaseModel):
@@ -324,3 +339,116 @@ async def delete_instance(
     await db.delete(inst)
     await db.commit()
     return {"detail": f"Instance {inst.name} removed"}
+
+
+async def _bg_update_settings(instance_id: str, server_id: str, settings: dict):
+    """Background task: apply settings changes via orchestrator."""
+    async with async_session() as db:
+        result = await db.execute(select(Instance).where(Instance.id == instance_id))
+        inst = result.scalar_one_or_none()
+        if not inst:
+            return
+        srv_result = await db.execute(select(Server).where(Server.id == server_id))
+        server = srv_result.scalar_one_or_none()
+        if not server:
+            return
+        await update_instance_settings(inst, server, db, settings)
+
+
+async def _bg_update_domain(instance_id: str, server_id: str, domain_data: dict):
+    """Background task: apply domain changes via orchestrator."""
+    async with async_session() as db:
+        result = await db.execute(select(Instance).where(Instance.id == instance_id))
+        inst = result.scalar_one_or_none()
+        if not inst:
+            return
+        srv_result = await db.execute(select(Server).where(Server.id == server_id))
+        server = srv_result.scalar_one_or_none()
+        if not server:
+            return
+        await update_instance_domain(inst, server, db, domain_data)
+
+
+@router.patch("/{instance_id}/settings", response_model=InstanceResponse)
+async def update_settings(
+    instance_id: str,
+    body: InstanceSettingsUpdate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    inst, server = await _get_instance_and_server(instance_id, user["telegram_id"], db)
+
+    settings_changed: dict = {}
+
+    if body.enterprise is not None:
+        # Validate enterprise package exists for this version
+        if body.enterprise:
+            enterprise_path = Path(__file__).resolve().parents[2] / "data" / "enterprise" / inst.version
+            if not enterprise_path.exists():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Enterprise package not found for version {inst.version}. Upload it first.",
+                )
+        settings_changed["enterprise"] = body.enterprise
+
+    if body.auto_ssl is not None:
+        settings_changed["auto_ssl"] = body.auto_ssl
+
+    if body.auto_update is not None:
+        settings_changed["auto_update"] = body.auto_update
+
+    # Merge settings into config (don't replace)
+    inst.config = {**(inst.config or {}), **settings_changed}
+    await db.commit()
+    await db.refresh(inst)
+
+    # Trigger orchestrator for enterprise or auto_ssl changes
+    if body.enterprise is not None or body.auto_ssl is not None:
+        background_tasks.add_task(_bg_update_settings, inst.id, server.id, settings_changed)
+
+    return _to_response(inst)
+
+
+@router.patch("/{instance_id}/domain", response_model=InstanceResponse)
+async def update_domain(
+    instance_id: str,
+    body: InstanceDomainUpdate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    inst, server = await _get_instance_and_server(instance_id, user["telegram_id"], db)
+
+    # Validate domain FQDN if provided
+    if body.domain:
+        fqdn_pattern = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63})*\.[A-Za-z]{2,}$")
+        if not fqdn_pattern.match(body.domain):
+            raise HTTPException(status_code=400, detail=f"Invalid domain: {body.domain}")
+
+    # Validate aliases
+    for alias in body.aliases:
+        fqdn_pattern = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63})*\.[A-Za-z]{2,}$")
+        if not fqdn_pattern.match(alias):
+            raise HTTPException(status_code=400, detail=f"Invalid alias domain: {alias}")
+
+    # Store aliases and http_redirect in config
+    inst.config = {
+        **(inst.config or {}),
+        "aliases": body.aliases,
+        "http_redirect": body.http_redirect,
+    }
+    if body.domain:
+        inst.domain = body.domain
+    await db.commit()
+    await db.refresh(inst)
+
+    # Trigger orchestrator for domain changes
+    domain_data = {
+        "domain": body.domain,
+        "aliases": body.aliases,
+        "http_redirect": body.http_redirect,
+    }
+    background_tasks.add_task(_bg_update_domain, inst.id, server.id, domain_data)
+
+    return _to_response(inst)

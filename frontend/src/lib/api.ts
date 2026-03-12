@@ -77,6 +77,10 @@ export const instancesApi = {
   scale: (id: string, workers: number) =>
     apiFetch<any>(`/api/v1/instances/${id}/scale?workers=${workers}`, { method: "POST" }),
   remove: (id: string) => apiFetch<void>(`/api/v1/instances/${id}`, { method: "DELETE" }),
+  updateSettings: (id: string, data: Record<string, any>) =>
+    apiFetch<any>(`/api/v1/instances/${id}/settings`, { method: "PATCH", body: JSON.stringify(data) }),
+  updateDomain: (id: string, data: Record<string, any>) =>
+    apiFetch<any>(`/api/v1/instances/${id}/domain`, { method: "PATCH", body: JSON.stringify(data) }),
 };
 
 // Backup API
@@ -131,4 +135,20 @@ export const settingsApi = {
     apiFetch<any>(`/api/v1/settings/backup-storages/${id}`, { method: "DELETE" }),
   // Account
   getAccount: () => apiFetch<any>("/api/v1/settings/account"),
+  // Enterprise Edition
+  listEnterprise: () => apiFetch<any[]>("/api/v1/settings/enterprise"),
+  deleteEnterprise: (version: string) =>
+    apiFetch<any>(`/api/v1/settings/enterprise/${version}`, { method: "DELETE" }),
+  uploadEnterprise: async (version: string, file: File) => {
+    const form = new FormData();
+    form.append("version", version);
+    form.append("file", file);
+    const res = await fetch(`/api/v1/settings/enterprise/upload`, {
+      method: "POST",
+      body: form,
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
 };
