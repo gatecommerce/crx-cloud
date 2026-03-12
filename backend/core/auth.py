@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import parse_qs
 
+from fastapi import HTTPException, Request, status
 from jose import JWTError, jwt
 from loguru import logger
 
@@ -224,16 +225,12 @@ def decode_session_jwt(token: str) -> Optional[dict]:
 
 # --- FastAPI Dependency ---
 
-async def get_current_user(request) -> dict:
+async def get_current_user(request: Request) -> dict:
     """FastAPI dependency: extract user from HttpOnly cookie JWT.
 
     Returns dict with: telegram_id (str), name, is_admin, lang.
     Use as: user: dict = Depends(get_current_user)
     """
-    from fastapi import HTTPException, status, Request
-
-    if not isinstance(request, Request):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="no_session")
 
     token = request.cookies.get(settings.cookie_name)
     if not token:

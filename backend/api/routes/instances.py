@@ -96,10 +96,9 @@ async def _bg_deploy(instance_id: str, server_id: str):
         await deploy_instance(inst, server, db)
 
 
-@router.get("/", response_model=list[InstanceResponse])
+@router.get("", response_model=list[InstanceResponse])
 async def list_instances(
     server_id: str | None = None,
-    request: Request = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -110,11 +109,10 @@ async def list_instances(
     return [_to_response(i) for i in result.scalars().all()]
 
 
-@router.post("/", response_model=InstanceResponse, status_code=201)
+@router.post("", response_model=InstanceResponse, status_code=201)
 async def create_instance(
     body: InstanceCreate,
     background_tasks: BackgroundTasks,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -154,7 +152,6 @@ async def create_instance(
 @router.get("/{instance_id}", response_model=InstanceResponse)
 async def get_instance(
     instance_id: str,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -170,7 +167,6 @@ async def get_instance(
 @router.post("/{instance_id}/restart")
 async def restart_instance_endpoint(
     instance_id: str,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -184,7 +180,6 @@ async def restart_instance_endpoint(
 @router.post("/{instance_id}/stop")
 async def stop_instance_endpoint(
     instance_id: str,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -200,7 +195,6 @@ async def stop_instance_endpoint(
 @router.post("/{instance_id}/start")
 async def start_instance_endpoint(
     instance_id: str,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -217,7 +211,6 @@ async def start_instance_endpoint(
 async def scale_instance(
     instance_id: str,
     workers: int = 2,
-    request: Request = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -230,7 +223,6 @@ async def scale_instance(
 @router.get("/{instance_id}/health")
 async def instance_health(
     instance_id: str,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -243,7 +235,6 @@ async def instance_health(
 async def instance_logs(
     instance_id: str,
     lines: int = 100,
-    request: Request = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -255,7 +246,6 @@ async def instance_logs(
 @router.delete("/{instance_id}")
 async def delete_instance(
     instance_id: str,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):

@@ -44,10 +44,9 @@ async def _bg_backup(backup_id: str, instance_id: str, server_id: str):
         await backup_instance(inst, server, backup, db)
 
 
-@router.get("/", response_model=list[BackupResponse])
+@router.get("", response_model=list[BackupResponse])
 async def list_backups(
     instance_id: str | None = None,
-    request: Request = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -75,7 +74,6 @@ async def list_backups(
 async def create_backup(
     instance_id: str,
     background_tasks: BackgroundTasks,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -103,7 +101,6 @@ async def create_backup(
 @router.post("/{backup_id}/restore")
 async def restore_backup(
     backup_id: str,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):

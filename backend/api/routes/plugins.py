@@ -5,7 +5,7 @@ from fastapi import APIRouter
 router = APIRouter()
 
 
-@router.get("/")
+@router.get("")
 async def list_available_plugins():
     """List available CMS plugins (odoo, wordpress, prestashop, etc.)."""
     return [

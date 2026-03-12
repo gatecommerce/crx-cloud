@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     # Domain
     domain: str = os.getenv("CLOUD_DOMAIN", "cloud.crx.team")
 
+    # Cloud Providers
+    hetzner_api_token: str = ""
+    digitalocean_api_token: str = ""
+    vultr_api_key: str = ""
+    linode_api_token: str = ""
+
     # Cloudflare
     cloudflare_api_token: str = ""
     cloudflare_zone_id: str = ""

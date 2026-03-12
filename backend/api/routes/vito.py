@@ -26,7 +26,6 @@ class VitoResponse(BaseModel):
 @router.post("/chat", response_model=VitoResponse)
 async def chat_with_vito(
     msg: VitoMessage,
-    request: Request,
     user: dict = Depends(get_current_user),
 ):
     if not settings.crx_team_api_url:

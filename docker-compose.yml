@@ -27,6 +27,10 @@ services:
       - APP_ENV=dev
       - DATABASE_URL=postgresql+asyncpg://crxcloud:crxcloud@db:5432/crxcloud
       - JWT_SECRET=dev-jwt-secret-change-in-prod
+      - HETZNER_API_TOKEN=JPijBH3wPUYDtEUsp0AwJMP6p5g7FAXV4nVeeUg3Xe6WtDZTZYiCTelatk7kQSRq
+      - DIGITALOCEAN_API_TOKEN=${DIGITALOCEAN_API_TOKEN:-}
+      - VULTR_API_KEY=${VULTR_API_KEY:-}
+      - LINODE_API_TOKEN=${LINODE_API_TOKEN:-}
     volumes:
       - ./backend:/app
     depends_on:
