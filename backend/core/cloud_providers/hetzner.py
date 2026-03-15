@@ -212,6 +212,24 @@ class HetznerClient:
             "ip": ip,
         }
 
+    async def resize_server(self, server_id: int, server_type: str, upgrade_disk: bool = True) -> dict:
+        """Resize a Hetzner server to a new plan. Server must be powered off first."""
+        data = await self._post(f"/servers/{server_id}/actions/change_type", {
+            "server_type": server_type,
+            "upgrade_disk": upgrade_disk,
+        })
+        return data.get("action", {})
+
+    async def power_off_server(self, server_id: int) -> dict:
+        """Power off a server (required before resize)."""
+        data = await self._post(f"/servers/{server_id}/actions/poweroff", {})
+        return data.get("action", {})
+
+    async def power_on_server(self, server_id: int) -> dict:
+        """Power on a server after resize."""
+        data = await self._post(f"/servers/{server_id}/actions/poweron", {})
+        return data.get("action", {})
+
     async def delete_server(self, server_id: int) -> bool:
         """Delete a Hetzner server."""
         try:

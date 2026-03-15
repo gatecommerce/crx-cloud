@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
-from api.routes import servers, instances, backups, plugins, health, vito, auth, cloud_providers, addons
+from api.routes import servers, instances, backups, plugins, health, vito, auth, cloud_providers, addons, github_oauth, logs_ws, migrations, clones, backup_schedules, database, monitoring, security_scan
 from api.routes import settings as settings_routes
 from core.config import settings
 from core.database import init_db
@@ -62,3 +62,11 @@ app.include_router(plugins.router, prefix="/api/v1/plugins", tags=["plugins"])
 app.include_router(vito.router, prefix="/api/v1/vito", tags=["vito"])
 app.include_router(cloud_providers.router, prefix="/api/v1/cloud", tags=["cloud-providers"])
 app.include_router(settings_routes.router, prefix="/api/v1/settings", tags=["settings"])
+app.include_router(github_oauth.router, prefix="/api/v1/settings", tags=["github-oauth"])
+app.include_router(migrations.router, prefix="/api/v1/migrations", tags=["migrations"])
+app.include_router(clones.router, prefix="/api/v1/clones", tags=["clones"])
+app.include_router(backup_schedules.router, prefix="/api/v1/backup-schedules", tags=["backup-schedules"])
+app.include_router(database.router, prefix="/api/v1/database", tags=["database"])
+app.include_router(monitoring.router, prefix="/api/v1/servers", tags=["monitoring"])
+app.include_router(security_scan.router, prefix="/api/v1/servers", tags=["security"])
+app.include_router(logs_ws.router, tags=["logs-ws"])

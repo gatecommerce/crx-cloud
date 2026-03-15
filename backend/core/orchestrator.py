@@ -5,11 +5,14 @@ DB models and plugin dataclasses.
 """
 
 import asyncio
+import time
 from typing import Optional
 
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.database import async_session
 
 from api.models.instance import Instance
 from api.models.server import Server
@@ -110,6 +113,7 @@ async def deploy_instance(inst: Instance, server: Server, db: AsyncSession) -> N
             "port": port,
             "workers": inst.workers,
             "ram_mb": inst.ram_mb,
+            "cpu_cores": inst.cpu_cores,
             "endpoint": server.endpoint,
             "ssh_metadata": {
                 "ssh_user": server.ssh_user or "root",
@@ -119,6 +123,29 @@ async def deploy_instance(inst: Instance, server: Server, db: AsyncSession) -> N
 
         # Pass DB instance ID so plugin uses the same ID for prefix/deploy_dir
         deploy_config["instance_id"] = inst.id
+
+        # If enterprise edition, sync addons to server BEFORE deploy
+        if deploy_config.get("edition") == "enterprise":
+            from pathlib import Path
+
+            ent_version = deploy_config.get("version", "19.0")
+            enterprise_dir = Path("data/enterprise") / ent_version
+            package_file = None
+            for f in enterprise_dir.iterdir() if enterprise_dir.exists() else []:
+                if f.suffix in (".gz", ".tgz", ".zip") or f.name.endswith(".tar.gz"):
+                    package_file = f
+                    break
+
+            if package_file:
+                server_info = _server_info_from_db(server)
+                logger.info(f"Syncing enterprise addons v{ent_version} to {server.name} before deploy")
+                ok = await plugin.sync_enterprise_addons(server_info, ent_version, str(package_file))
+                if not ok:
+                    logger.warning(f"Enterprise addons sync failed — deploying without enterprise modules")
+                    deploy_config["edition"] = "community"
+            else:
+                logger.warning(f"No enterprise package for v{ent_version} — deploying as community")
+                deploy_config["edition"] = "community"
 
         logger.info(f"Deploying {inst.cms_type} instance {inst_name} on {server.name}:{port}")
         cms_instance = await plugin.deploy(server.id, deploy_config)
@@ -238,48 +265,236 @@ async def remove_instance(inst: Instance, server: Server) -> bool:
     return result
 
 
-async def backup_instance(inst: Instance, server: Server, backup: Backup, db: AsyncSession) -> None:
-    """Create a backup asynchronously via the CMS plugin.
+async def _update_progress(backup: Backup, db: AsyncSession, step: str, detail: str = "") -> None:
+    """Update backup progress in DB so the frontend can poll it."""
+    backup.progress = {"step": step, "detail": detail}
+    try:
+        await db.commit()
+    except Exception:
+        # Don't let a progress-update failure poison the session
+        await db.rollback()
+        logger.warning(f"Backup {backup.id}: progress update failed at step={step}")
 
-    Updates Backup status: pending -> in_progress -> completed | failed.
+
+# Global set of backup IDs that have been cancelled — checked between steps
+_cancelled_backups: set[str] = set()
+
+
+def mark_backup_cancelled(backup_id: str) -> None:
+    """Signal a running backup to stop at the next step boundary."""
+    _cancelled_backups.add(backup_id)
+
+
+async def _check_cancelled(backup: Backup, inst: Instance, db: AsyncSession, server_info, vm, backup_dir: str | None) -> bool:
+    """Check if backup was cancelled. If so, clean up and return True."""
+    if str(backup.id) not in _cancelled_backups:
+        return False
+
+    _cancelled_backups.discard(str(backup.id))
+    logger.info(f"Backup {backup.id} cancelled by user — aborting")
+
+    # Kill any running pg_dump on the server (best-effort)
+    if server_info and vm:
+        try:
+            await vm._ssh_exec(server_info, "pkill -f 'pg_dump' || true", timeout=10)
+        except Exception:
+            pass
+        # Clean up partial backup directory
+        if backup_dir:
+            try:
+                await vm._ssh_exec(server_info, f"rm -rf {backup_dir}", timeout=15)
+            except Exception:
+                pass
+
+    from datetime import datetime, timezone
+    backup.status = "failed"
+    backup.error_message = "Cancelled by user"
+    backup.completed_at = datetime.utcnow()
+    backup.duration_seconds = int(time.time() - backup._start_time) if hasattr(backup, '_start_time') else 0
+    backup.progress = {"step": "failed", "detail": "cancelled"}
+    inst.status = "running"
+    await db.commit()
+    return True
+
+
+async def backup_instance(inst: Instance, server: Server, backup: Backup, db: AsyncSession) -> None:
+    """Create a backup asynchronously with step-by-step progress tracking.
+
+    Hot backup: the instance keeps running (pg_dump is non-blocking for Odoo/PostgreSQL).
+    Progress steps: preparing → db_dump → filestore → finalizing → completed/failed.
+    Supports cancellation between steps via _cancelled_backups set.
     """
+    from core.vm_controller import VMDriver
+    from datetime import datetime, timezone
+
     plugin = get_plugin(inst.cms_type)
     if not plugin:
         backup.status = "failed"
         await db.commit()
         return
 
+    start = time.time()
+    backup._start_time = start  # stash for _check_cancelled
+    backup_dir = None
+    server_info = None
+    vm = None
+
     try:
         backup.status = "in_progress"
-        await db.commit()
+        inst.status = "backing_up"
+        await _update_progress(backup, db, "preparing")
 
         cms = _db_to_cms_instance(inst, server)
-        storage_path = await plugin.backup(cms)
+        server_info = _server_info_from_db(server)
+        vm = VMDriver()
+
+        # --- Odoo: phased backup with progress ---
+        if inst.cms_type == "odoo":
+            prefix = cms.config.get("prefix", "")
+            db_name = cms.config.get("db_name", "postgres")
+            ssh_meta = cms.config.get("ssh_metadata", {})
+            server_conn = plugin._server_info(inst.server_id, cms.config.get("endpoint", ""), ssh_meta)
+
+            import uuid as _uuid
+            backup_id_short = _uuid.uuid4().hex[:12]
+            backup_dir = f"/opt/crx-cloud/backups/{prefix}/{backup_id_short}"
+
+            # Step 1: create directory
+            await vm._ssh_exec(server_info, f"mkdir -p {backup_dir}", timeout=30)
+
+            if await _check_cancelled(backup, inst, db, server_info, vm, backup_dir):
+                return
+
+            # Step 2: database dump (hot — PostgreSQL MVCC ensures consistency)
+            await _update_progress(backup, db, "db_dump", f"pg_dump {db_name}")
+            await vm._ssh_exec(
+                server_info,
+                f"docker exec {prefix}-db pg_dump -U odoo -Fc {db_name} > {backup_dir}/db.dump",
+                timeout=3600,
+            )
+
+            if await _check_cancelled(backup, inst, db, server_info, vm, backup_dir):
+                return
+
+            # Step 3: filestore copy (optional)
+            if backup.include_filestore:
+                await _update_progress(backup, db, "filestore", "docker cp filestore")
+                await vm._ssh_exec(
+                    server_info,
+                    f"docker cp {prefix}-odoo:/var/lib/odoo/filestore/{db_name} {backup_dir}/filestore 2>/dev/null || true",
+                    timeout=3600,
+                )
+            else:
+                logger.info(f"Backup {backup.id}: filestore skipped (include_filestore=False)")
+
+            if await _check_cancelled(backup, inst, db, server_info, vm, backup_dir):
+                return
+
+            storage_path = backup_dir
+        else:
+            # Other CMS: single-step via plugin (no granular progress)
+            await _update_progress(backup, db, "db_dump")
+            storage_path = await plugin.backup(cms)
+
+        # Step 4: finalizing — get size
+        await _update_progress(backup, db, "finalizing", "calculating size")
+        elapsed = int(time.time() - start)
 
         if storage_path:
             backup.status = "completed"
             backup.storage_path = storage_path
-            # Get size (approximate)
-            logger.info(f"Backup {backup.id} completed: {storage_path}")
+            backup.duration_seconds = elapsed
+
+            try:
+                size_out = await vm._ssh_exec(
+                    server_info,
+                    f"du -sb {storage_path} 2>/dev/null | cut -f1",
+                    timeout=15,
+                )
+                size_bytes = int(size_out.strip())
+                backup.size_mb = max(1, size_bytes // (1024 * 1024))
+            except Exception as e:
+                logger.warning(f"Backup {backup.id}: could not get size: {e}")
+                backup.size_mb = None
+
+            backup.progress = {"step": "completed"}
+            logger.info(f"Backup {backup.id} completed in {elapsed}s: {storage_path}")
         else:
             backup.status = "failed"
+            backup.error_message = "Plugin returned empty path"
+            backup.progress = {"step": "failed", "detail": "empty path"}
             logger.error(f"Backup {backup.id} returned empty path")
 
-        await db.commit()
+        inst.status = "running"
+        backup.completed_at = datetime.utcnow()
+        try:
+            await db.commit()
+        except Exception as commit_err:
+            logger.error(f"Backup {backup.id}: final commit failed: {commit_err}")
+            # Session may be poisoned — use fresh session to persist result
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            async with async_session() as fresh_db:
+                await fresh_db.execute(
+                    update(Backup).where(Backup.id == backup.id).values(
+                        status=backup.status,
+                        storage_path=backup.storage_path,
+                        size_mb=backup.size_mb,
+                        duration_seconds=backup.duration_seconds,
+                        progress=backup.progress,
+                        completed_at=backup.completed_at,
+                        error_message=backup.error_message,
+                    )
+                )
+                await fresh_db.execute(
+                    update(Instance).where(Instance.id == inst.id).values(status="running")
+                )
+                await fresh_db.commit()
+                logger.info(f"Backup {backup.id}: saved via fresh session fallback")
 
     except Exception as e:
         logger.error(f"Backup {backup.id} failed: {e}")
+        try:
+            await db.rollback()  # clear any PendingRollbackError
+        except Exception:
+            pass
         backup.status = "failed"
-        await db.commit()
+        backup.error_message = str(e)[:2000]
+        backup.progress = {"step": "failed", "detail": str(e)[:200]}
+        backup.duration_seconds = int(time.time() - start)
+        inst.status = "running"
+        try:
+            await db.commit()
+        except Exception as commit_err:
+            logger.error(f"Backup {backup.id}: recovery commit also failed: {commit_err}")
+            # Last resort: use a fresh session to update the status
+            try:
+                async with async_session() as fresh_db:
+                    await fresh_db.execute(
+                        update(Backup).where(Backup.id == backup.id).values(
+                            status="failed", error_message=str(e)[:2000],
+                            progress={"step": "failed", "detail": str(e)[:200]},
+                        )
+                    )
+                    await fresh_db.execute(
+                        update(Instance).where(Instance.id == inst.id).values(status="running")
+                    )
+                    await fresh_db.commit()
+            except Exception as last_err:
+                logger.error(f"Backup {backup.id}: fresh session fallback also failed: {last_err}")
+    finally:
+        _cancelled_backups.discard(str(backup.id))
 
 
-async def restore_instance(inst: Instance, server: Server, backup: Backup) -> bool:
+async def restore_instance(inst: Instance, server: Server, backup: Backup, include_filestore: bool = True) -> bool:
     """Restore an instance from a backup via the CMS plugin."""
     plugin = get_plugin(inst.cms_type)
     if not plugin:
         return False
     cms = _db_to_cms_instance(inst, server)
-    return await plugin.restore(cms, backup.storage_path or backup.id)
+    return await plugin.restore(cms, backup.storage_path or backup.id, include_filestore=include_filestore)
 
 
 async def health_check_instance(inst: Instance, server: Server) -> dict:
@@ -377,6 +592,7 @@ async def update_instance_settings(inst: Instance, server: Server, db: AsyncSess
                 # Success — set status AFTER _update_config's refresh, not before
                 await _update_config({
                     "enterprise": True,
+                    "edition": "enterprise",
                     "enterprise_progress": None,
                     "enterprise_error": None,
                     "enterprise_revision_date": enterprise_revision,
@@ -398,10 +614,34 @@ async def update_instance_settings(inst: Instance, server: Server, db: AsyncSess
 
         elif "enterprise" in settings and not settings["enterprise"]:
             # Disable enterprise — revert to community compose
-            await _refresh()
-            cms = _db_to_cms_instance(inst, server)
-            ok = await plugin.update_compose(cms, {"enterprise": False})
-            logger.info(f"Enterprise disabled for {inst_name}")
+            inst.status = "upgrading"
+            await _update_config({
+                "enterprise_progress": "Disabling enterprise modules...",
+                "enterprise_error": None,
+            })
+            logger.info(f"Disabling enterprise for {inst_name}")
+
+            try:
+                await _refresh()
+                cms = _db_to_cms_instance(inst, server)
+                ok = await plugin.update_compose(cms, {"enterprise": False, "edition": "community"})
+                await _update_config({
+                    "enterprise": False,
+                    "edition": "community",
+                    "enterprise_progress": None,
+                    "enterprise_error": None,
+                })
+                inst.status = "running"
+                await db.commit()
+                logger.info(f"Enterprise disabled for {inst_name}")
+            except Exception as e:
+                logger.error(f"Enterprise disable failed for {inst_name}: {e}")
+                await _update_config({
+                    "enterprise_progress": None,
+                    "enterprise_error": str(e),
+                })
+                inst.status = "running"
+                await db.commit()
 
         # SSL toggle
         if "auto_ssl" in settings:

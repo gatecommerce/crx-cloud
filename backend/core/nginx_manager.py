@@ -75,21 +75,28 @@ server {{
 }}
 """
 
-NGINX_HTTPS_TEMPLATE = """# CRX Cloud — {instance_name} (SSL)
+NGINX_HTTPS_TEMPLATE = """# CRX Cloud — {instance_name} (SSL) — Enterprise v2
 server {{
     listen 443 ssl http2;
     server_name {server_names};
 
     ssl_certificate /etc/letsencrypt/live/{domain}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/{domain}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
 
-    # Security headers
+    # --- Security Headers ---
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
 
-    # Proxy settings
+    # --- Proxy Settings ---
     proxy_read_timeout 720s;
     proxy_connect_timeout 720s;
     proxy_send_timeout 720s;
@@ -97,35 +104,104 @@ server {{
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
 
-    # WebSocket support (Odoo live chat)
+    # Keepalive to upstream (persistent connections to Odoo)
     proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
+    proxy_set_header Connection "";
 
-    # Gzip
+    # Buffers (Odoo sends large cookies and headers)
+    proxy_buffers 16 64k;
+    proxy_buffer_size 128k;
+    proxy_busy_buffers_size 256k;
+    large_client_header_buffers 4 32k;
+
+    # --- Gzip Compression ---
     gzip on;
-    gzip_types text/css text/plain text/xml application/xml application/javascript application/json;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 5;
+    gzip_min_length 256;
+    gzip_types text/plain text/css text/xml text/javascript
+               application/json application/javascript application/xml
+               application/rss+xml application/xhtml+xml
+               image/svg+xml font/woff2;
 
     # Max upload size
-    client_max_body_size 200m;
+    client_max_body_size 256m;
 
-    # Odoo longpolling
-    location /longpolling {{
-        proxy_pass http://127.0.0.1:{longpoll_port};
+    # --- Block Database Manager (security hardening) ---
+    location ~* /web/database {{
+        deny all;
+        return 404;
     }}
 
+    # --- Block xmlrpc if unused (security) ---
+    location /xmlrpc {{
+        deny all;
+        return 403;
+    }}
+
+    # --- Rate-limited Login (brute-force protection: 5/min) ---
+    location /web/login {{
+        limit_req zone=crx_login burst=5 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:{upstream_port};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }}
+
+    # --- Rate-limited JSON-RPC API (30/sec) ---
+    location /jsonrpc {{
+        limit_req zone=crx_api burst=10 nodelay;
+        proxy_pass http://127.0.0.1:{upstream_port};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }}
+
+    # --- Static Assets (aggressive caching) ---
+    location ~* /web/static/ {{
+        proxy_pass http://127.0.0.1:{upstream_port};
+        proxy_cache_valid 200 90m;
+        proxy_cache_valid 404 1m;
+        proxy_buffering on;
+        expires 864000;
+        add_header Cache-Control "public, immutable";
+    }}
+
+    # --- WebSocket (Odoo 17+ live chat, notifications) ---
+    location /websocket {{
+        proxy_pass http://127.0.0.1:{longpoll_port};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+    }}
+
+    # --- Longpolling (Odoo 16 and earlier) ---
+    location /longpolling {{
+        proxy_pass http://127.0.0.1:{longpoll_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+    }}
+
+    # --- Default: All Other Routes ---
     location / {{
         proxy_pass http://127.0.0.1:{upstream_port};
         proxy_redirect off;
-    }}
-
-    # Static file caching
-    location ~* /web/static/ {{
-        proxy_pass http://127.0.0.1:{upstream_port};
-        proxy_cache_valid 200 60m;
-        expires 24h;
-        add_header Cache-Control "public, immutable";
+        proxy_buffering on;
     }}
 }}
 """
@@ -252,6 +328,17 @@ async def setup_nginx(
             if rc != 0:
                 logger.error(f"Failed to install Nginx: {out}")
                 return False
+
+        # 1b. Ensure CRX Cloud global rate limiting config exists (idempotent)
+        rate_limit_conf = (
+            "# CRX Cloud — global rate limiting zones\n"
+            "limit_req_zone $binary_remote_addr zone=crx_login:10m rate=5r/m;\n"
+            "limit_req_zone $binary_remote_addr zone=crx_api:10m rate=30r/s;\n"
+        )
+        await _ssh_write_file(
+            host, ssh_user, ssh_key_path,
+            "/etc/nginx/conf.d/crx-rate-limit.conf", rate_limit_conf
+        )
 
         # 2. Write initial HTTP-only config (needed for certbot challenge)
         if config.ssl:

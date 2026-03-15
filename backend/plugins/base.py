@@ -55,7 +55,7 @@ class CMSPlugin(ABC):
         """Create a backup. Returns backup ID/path."""
 
     @abstractmethod
-    async def restore(self, instance: CMSInstance, backup_id: str) -> bool:
+    async def restore(self, instance: CMSInstance, backup_id: str, include_filestore: bool = True) -> bool:
         """Restore from a backup."""
 
     @abstractmethod

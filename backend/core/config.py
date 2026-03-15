@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     cloudflare_api_token: str = ""
     cloudflare_zone_id: str = ""
 
+    # GitHub (Marketplace + OAuth for private repos)
+    github_token: str = ""  # PAT for API access (5000 req/hr vs 60 unauthenticated)
+    github_oauth_client_id: str = ""
+    github_oauth_client_secret: str = ""
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

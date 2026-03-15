@@ -44,7 +44,7 @@ class PrestaShopPlugin(CMSPlugin):
         logger.info(f"Backing up PrestaShop {instance.id}")
         return ""
 
-    async def restore(self, instance: CMSInstance, backup_id: str) -> bool:
+    async def restore(self, instance: CMSInstance, backup_id: str, include_filestore: bool = True) -> bool:
         return True
 
     async def health_check(self, instance: CMSInstance) -> dict:
