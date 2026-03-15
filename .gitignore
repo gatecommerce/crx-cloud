@@ -34,3 +34,7 @@ logs/
 # Data
 data/dev/
 data/prod/
+
+# Backend data — large binaries and secrets
+backend/data/enterprise/
+backend/data/ssh_keys/
