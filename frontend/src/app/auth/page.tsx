@@ -2,10 +2,12 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 
 function AuthContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const t = useTranslations("auth");
   const [status, setStatus] = useState<"validating" | "error">("validating");
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -13,7 +15,7 @@ function AuthContent() {
     const token = searchParams.get("token");
     if (!token) {
       setStatus("error");
-      setErrorMsg("Token mancante o non valido. Richiedi un nuovo link dal bot Telegram.");
+      setErrorMsg(t("tokenMissing"));
       return;
     }
 
@@ -26,18 +28,17 @@ function AuthContent() {
       .then(async (res) => {
         if (res.ok) {
           const data = await res.json();
-          // Session cookie is set automatically by the backend
           router.replace(data.redirect || "/");
         } else {
           setStatus("error");
-          setErrorMsg("Token scaduto o non valido. Richiedi un nuovo link dal bot Telegram.");
+          setErrorMsg(t("tokenExpired"));
         }
       })
       .catch(() => {
         setStatus("error");
-        setErrorMsg("Errore di connessione. Riprova tra qualche secondo.");
+        setErrorMsg(t("connectionError"));
       });
-  }, [router, searchParams]);
+  }, [router, searchParams, t]);
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-[var(--background)]">
@@ -45,7 +46,7 @@ function AuthContent() {
         {status === "validating" ? (
           <div>
             <div className="w-10 h-10 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-            <p className="text-[var(--muted)]">Verifica accesso in corso...</p>
+            <p className="text-[var(--muted)]">{t("validating")}</p>
           </div>
         ) : (
           <div className="bg-[var(--danger)]/10 border border-[var(--danger)]/30 rounded-xl p-6">
@@ -57,7 +58,7 @@ function AuthContent() {
               href="/login"
               className="inline-block px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-sm font-medium transition-colors"
             >
-              Torna al login
+              {t("backToLogin")}
             </a>
           </div>
         )}

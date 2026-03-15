@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { useTranslations } from "next-intl";
 import { serversApi, cloudApi } from "@/lib/api";
 import {
   Server as ServerIcon, Cpu, MemoryStick, HardDrive, Trash2,
@@ -111,6 +112,8 @@ const currencySymbol: Record<string, string> = { EUR: "€", USD: "$", GBP: "£"
 // ─── Server List (main) ─────────────────────────────────────────────
 
 export function ServerList() {
+  const t = useTranslations("servers");
+  const tc = useTranslations("common");
   const [servers, setServers] = useState<ServerData[]>([]);
   const [metrics, setMetrics] = useState<Record<string, Metrics>>({});
   const [loading, setLoading] = useState(true);
@@ -183,7 +186,7 @@ export function ServerList() {
   return (
     <>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Servers</h1>
+        <h1 className="text-2xl font-bold">{t("title")}</h1>
         <div className="flex items-center gap-2">
           {/* Search */}
           <div className="relative">
@@ -191,7 +194,7 @@ export function ServerList() {
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search servers..."
+              placeholder={t("searchServers")}
               className="pl-8 pr-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm w-44 focus:outline-none focus:border-[var(--accent)] focus:w-56 transition-all"
             />
           </div>
@@ -220,7 +223,7 @@ export function ServerList() {
             onClick={() => setShowWizard(true)}
             className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
           >
-            <Plus size={16} /> Add Server
+            <Plus size={16} /> {t("addServer")}
           </button>
         </div>
       </div>
@@ -233,11 +236,11 @@ export function ServerList() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-[var(--border)]">
-                <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">Server</th>
-                <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">IP</th>
-                <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">Specs</th>
-                <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">Status</th>
-                <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">Instances</th>
+                <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">{t("server")}</th>
+                <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">{t("ip")}</th>
+                <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">{t("specs")}</th>
+                <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">{tc("status")}</th>
+                <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">{t("instances")}</th>
                 <th className="text-right text-xs font-normal text-[var(--muted)] px-5 py-3"></th>
               </tr>
             </thead>
@@ -252,7 +255,7 @@ export function ServerList() {
                           {prov.short}
                         </div>
                         <div>
-                          <div className="text-sm font-medium">{server.name}</div>
+                          <a href={`/servers/${server.id}`} className="text-sm font-medium hover:text-[var(--accent)] transition-colors">{server.name}</a>
                           <div className="text-xs text-[var(--muted)]">
                             {server.server_type === "kubernetes" ? "K8s" : "VM"} &middot; {prov.label}
                           </div>
@@ -289,12 +292,12 @@ export function ServerList() {
                       <div className="flex items-center gap-2">
                         <div className={`w-2.5 h-2.5 rounded-full ${statusColors[server.status] || "bg-[var(--muted)]"}`} />
                         <span className="text-sm capitalize">
-                          {server.status === "online" ? "Connected" : server.status}
+                          {server.status === "online" ? t("connected") : server.status === "provisioning" ? t("provisioning") : server.status}
                         </span>
                       </div>
                     </td>
                     <td className="px-5 py-4 text-sm text-[var(--muted)]">
-                      {server.instances_count || 0} instance{(server.instances_count || 0) !== 1 ? "s" : ""}
+                      {t("instanceCount", { count: server.instances_count || 0 })}
                     </td>
                     <td className="px-5 py-4 text-right">
                       <button
@@ -310,7 +313,7 @@ export function ServerList() {
             </tbody>
           </table>
           <div className="text-right text-xs text-[var(--muted)] px-5 py-3 border-t border-[var(--border)]">
-            Showing <span className="font-semibold text-[var(--accent)]">{filteredServers.length}</span> Server{filteredServers.length !== 1 ? "s" : ""} of <span className="font-semibold text-[var(--accent)]">{servers.length}</span> Server{servers.length !== 1 ? "s" : ""}.
+            {t("showingServers", { filtered: filteredServers.length, total: servers.length })}
           </div>
         </div>
       ) : (
@@ -334,7 +337,7 @@ export function ServerList() {
                         {prov.short}
                       </div>
                       <div>
-                        <h3 className="font-semibold text-sm">{server.name}</h3>
+                        <h3 className="font-semibold text-sm"><a href={`/servers/${server.id}`} className="hover:text-[var(--accent)] transition-colors">{server.name}</a></h3>
                         <div className="text-xs text-[var(--muted)]">
                           {server.server_type === "kubernetes" ? "K8s" : "VM"} &middot; {server.endpoint}
                         </div>
@@ -343,7 +346,7 @@ export function ServerList() {
                     <div className="flex items-center gap-2">
                       <div className={`w-2.5 h-2.5 rounded-full ${statusColors[server.status] || "bg-[var(--muted)]"}`} />
                       <span className="text-xs font-medium">
-                        {server.status === "online" ? "Connected" : server.status === "provisioning" ? "Provisioning" : server.status}
+                        {server.status === "online" ? t("connected") : server.status === "provisioning" ? t("provisioning") : server.status}
                       </span>
                       {server.status === "provisioning" && <Loader2 size={12} className="text-[var(--warning)] animate-spin" />}
                     </div>
@@ -390,7 +393,7 @@ export function ServerList() {
                   {server.status === "provisioning" && (
                     <div className="mb-4 text-xs text-[var(--warning)] flex items-center gap-2">
                       <Loader2 size={12} className="animate-spin" />
-                      Setting up environment...
+                      {t("settingUpEnvironment")}
                     </div>
                   )}
 
@@ -406,7 +409,7 @@ export function ServerList() {
                   {/* Footer: instances count + security + actions */}
                   <div className="flex items-center justify-between pt-3 border-t border-[var(--border)]">
                     <span className="text-xs text-[var(--muted)]">
-                      {server.instances_count || 0} instance{(server.instances_count || 0) !== 1 ? "s" : ""}
+                      {t("instanceCount", { count: server.instances_count || 0 })}
                     </span>
                     <div className="flex items-center gap-2">
                       {server.status === "online" && (
@@ -424,13 +427,19 @@ export function ServerList() {
                             }
                           }}
                           className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full transition-colors hover:bg-[var(--border)]"
-                          title="Security audit"
+                          title={t("securityAudit")}
                         >
                           <ShieldCheck size={12} className={sec?.security_score >= 80 ? "text-[var(--success)]" : sec?.security_score >= 50 ? "text-[var(--warning)]" : "text-[var(--muted)]"} />
                           {sec && <span className={sec.security_score >= 80 ? "text-[var(--success)]" : sec.security_score >= 50 ? "text-[var(--warning)]" : "text-[var(--danger)]"}>{sec.security_score}</span>}
                           {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
                         </button>
                       )}
+                      <a
+                        href={`/servers/${server.id}`}
+                        className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/20 transition-colors"
+                      >
+                        Manage <ArrowRight size={10} />
+                      </a>
                       <button
                         onClick={() => handleDeleteClick(server)}
                         className="text-[var(--muted)] hover:text-[var(--danger)] transition-colors"
@@ -443,9 +452,9 @@ export function ServerList() {
                   {/* Expanded security panel */}
                   {isExpanded && sec && (
                     <SecurityPanel server={server} data={sec} onReboot={() => {
-                      if (confirm(`Reboot server "${server.name}"? All instances will restart.`)) {
+                      if (confirm(t("confirmReboot", { name: server.name }))) {
                         serversApi.reboot(server.id).then(() => {
-                          alert("Reboot scheduled in 1 minute.");
+                          alert(t("rebootScheduled"));
                         }).catch((e: any) => alert(e.message));
                       }
                     }} />
@@ -453,7 +462,7 @@ export function ServerList() {
                   {isExpanded && !sec && (
                     <div className="mt-4 flex items-center justify-center py-4">
                       <Loader2 size={16} className="animate-spin text-[var(--accent)]" />
-                      <span className="ml-2 text-xs text-[var(--muted)]">Running security audit...</span>
+                      <span className="ml-2 text-xs text-[var(--muted)]">{t("runningSecurityAudit")}</span>
                     </div>
                   )}
                 </div>
@@ -461,7 +470,7 @@ export function ServerList() {
             })}
           </div>
           <div className="text-right text-xs text-[var(--muted)] mt-4">
-            Showing <span className="font-semibold text-[var(--accent)]">{filteredServers.length}</span> Server{filteredServers.length !== 1 ? "s" : ""} of <span className="font-semibold text-[var(--accent)]">{servers.length}</span> Server{servers.length !== 1 ? "s" : ""}.
+            {t("showingServers", { filtered: filteredServers.length, total: servers.length })}
           </div>
         </>
       )}
@@ -493,6 +502,8 @@ function DeleteServerDialog({ name, provider, hasCloud, onConfirm, onCancel }: {
   name: string; provider?: string; hasCloud: boolean;
   onConfirm: (destroyCloud: boolean) => void; onCancel: () => void;
 }) {
+  const t = useTranslations("servers");
+  const tc = useTranslations("common");
   const [destroyCloud, setDestroyCloud] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const providerLabel = provider ? (providerLogos[provider]?.label || provider) : "";
@@ -508,13 +519,13 @@ function DeleteServerDialog({ name, provider, hasCloud, onConfirm, onCancel }: {
             <Trash2 size={20} className="text-[var(--danger)]" />
           </div>
           <div>
-            <h3 className="font-semibold">Remove Server</h3>
+            <h3 className="font-semibold">{t("deleteTitle")}</h3>
             <p className="text-sm text-[var(--muted)]">{name}</p>
           </div>
         </div>
 
         <p className="text-sm text-[var(--muted)] mb-4">
-          This will remove the server from your dashboard and delete all associated instances.
+          {t("deleteDescription")}
         </p>
 
         {hasCloud && (
@@ -527,10 +538,10 @@ function DeleteServerDialog({ name, provider, hasCloud, onConfirm, onCancel }: {
             />
             <div>
               <span className="text-sm font-medium text-[var(--danger)]">
-                Also destroy on {providerLabel}
+                {t("destroyOnProvider", { provider: providerLabel })}
               </span>
               <p className="text-xs text-[var(--muted)] mt-0.5">
-                The server will be permanently deleted from your {providerLabel} account. This stops all billing.
+                {t("destroyDescription", { provider: providerLabel })}
               </p>
             </div>
           </label>
@@ -541,7 +552,7 @@ function DeleteServerDialog({ name, provider, hasCloud, onConfirm, onCancel }: {
             onClick={onCancel}
             className="px-4 py-2 text-sm text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
           >
-            Cancel
+            {tc("cancel")}
           </button>
           <button
             onClick={async () => { setDeleting(true); await onConfirm(destroyCloud); }}
@@ -549,7 +560,7 @@ function DeleteServerDialog({ name, provider, hasCloud, onConfirm, onCancel }: {
             className="px-4 py-2 text-sm font-medium bg-[var(--danger)] hover:bg-[var(--danger)]/80 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
           >
             {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-            {destroyCloud ? "Remove & Destroy" : "Remove"}
+            {destroyCloud ? t("removeAndDestroy") : tc("remove")}
           </button>
         </div>
       </div>
@@ -560,35 +571,35 @@ function DeleteServerDialog({ name, provider, hasCloud, onConfirm, onCancel }: {
 // ─── Empty State ─────────────────────────────────────────────────────
 
 function EmptyState({ onConnect }: { onConnect: () => void }) {
+  const t = useTranslations("servers");
   return (
     <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-12 text-center">
       <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-[var(--accent)]/10 flex items-center justify-center">
         <ServerIcon size={32} className="text-[var(--accent)]" />
       </div>
-      <h3 className="text-lg font-semibold mb-2">Deploy your first server</h3>
+      <h3 className="text-lg font-semibold mb-2">{t("emptyTitle")}</h3>
       <p className="text-sm text-[var(--muted)] mb-6 max-w-md mx-auto">
-        Create a new server on Hetzner, DigitalOcean, Vultr, or Linode — or connect
-        a server you already have. Ready in 60 seconds.
+        {t("emptyDescription")}
       </p>
       <div className="flex gap-8 justify-center mb-8 text-sm text-[var(--muted)]">
         <div className="flex items-center gap-2">
           <Zap size={16} className="text-[var(--accent)]" />
-          Auto setup
+          {t("autoSetup")}
         </div>
         <div className="flex items-center gap-2">
           <Shield size={16} className="text-[var(--accent)]" />
-          SSH key auth
+          {t("sshKeyAuth")}
         </div>
         <div className="flex items-center gap-2">
           <Globe size={16} className="text-[var(--accent)]" />
-          4+ providers
+          {t("multiProvider")}
         </div>
       </div>
       <button
         onClick={onConnect}
         className="px-6 py-3 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-sm font-medium transition-colors"
       >
-        Add Server
+        {t("addServer")}
       </button>
     </div>
   );
@@ -636,52 +647,54 @@ function ResourceBar({ label, value }: { label: string; value?: number }) {
 // ─── Security Panel ──────────────────────────────────────────────
 
 function SecurityPanel({ server, data, onReboot }: { server: ServerData; data: any; onReboot: () => void }) {
+  const t = useTranslations("servers");
+  const tc = useTranslations("common");
   const scoreColor = data.security_score >= 80 ? "text-[var(--success)]" : data.security_score >= 50 ? "text-[var(--warning)]" : "text-[var(--danger)]";
-  const scoreLabel = data.security_score >= 80 ? "Excellent" : data.security_score >= 50 ? "Fair" : "Needs attention";
+  const scoreLabel = data.security_score >= 80 ? t("security.excellent") : data.security_score >= 50 ? t("security.fair") : t("security.needsAttention");
 
   return (
     <div className="mt-4 pt-4 border-t border-[var(--border)]">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <ShieldCheck size={16} className={scoreColor} />
-          <span className="text-sm font-medium">Security Score: <span className={scoreColor}>{data.security_score}/100</span></span>
+          <span className="text-sm font-medium">{t("security.score")}: <span className={scoreColor}>{data.security_score}/100</span></span>
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--border)] text-[var(--muted)]">{scoreLabel}</span>
         </div>
         <div className="flex items-center gap-2">
           {data.reboot_required && (
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--warning)]/10 text-[var(--warning)] flex items-center gap-1">
-              <AlertTriangle size={10} /> Reboot required
+              <AlertTriangle size={10} /> {t("rebootRequired")}
             </span>
           )}
           <button
             onClick={onReboot}
             className="text-xs px-2.5 py-1 rounded-lg bg-[var(--background)] border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--accent)]/50 transition-colors flex items-center gap-1"
           >
-            <RotateCw size={11} /> Reboot
+            <RotateCw size={11} /> {t("reboot")}
           </button>
         </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <SecurityItem
-          label="Firewall"
+          label={t("security.firewall")}
           active={data.firewall?.enabled}
-          detail={data.firewall?.enabled ? "UFW active" : "Not configured"}
+          detail={data.firewall?.enabled ? t("security.ufwActive") : t("security.notConfigured")}
         />
         <SecurityItem
-          label="Fail2ban"
+          label={t("security.fail2ban")}
           active={data.fail2ban?.active}
-          detail={data.fail2ban?.active ? `${data.fail2ban.banned_ips} banned` : "Inactive"}
+          detail={data.fail2ban?.active ? t("security.banned", { count: data.fail2ban.banned_ips }) : tc("inactive")}
         />
         <SecurityItem
-          label="SSH Hardened"
+          label={t("security.sshHardened")}
           active={data.ssh?.password_auth_disabled}
-          detail={data.ssh?.password_auth_disabled ? "Key-only auth" : "Password enabled"}
+          detail={data.ssh?.password_auth_disabled ? t("security.keyOnlyAuth") : t("security.passwordEnabled")}
         />
         <SecurityItem
-          label="Auto Updates"
+          label={t("security.autoUpdates")}
           active={data.auto_updates?.active}
-          detail={data.auto_updates?.active ? "Security patches" : "Disabled"}
+          detail={data.auto_updates?.active ? t("security.securityPatches") : tc("disabled")}
         />
       </div>
 
@@ -693,7 +706,7 @@ function SecurityPanel({ server, data, onReboot }: { server: ServerData; data: a
           {data.docker?.version && <span>{data.docker.version}</span>}
           {data.swap_mb > 0 && <span>Swap: {data.swap_mb} MB</span>}
           {data.pending_updates > 0 && (
-            <span className="text-[var(--warning)]">{data.pending_updates} pending updates</span>
+            <span className="text-[var(--warning)]">{t("security.pendingUpdates", { count: data.pending_updates })}</span>
           )}
         </div>
       )}
@@ -739,6 +752,7 @@ const manualProviders = [
 ];
 
 function ConnectServerWizard({ onClose, onConnected }: { onClose: () => void; onConnected: () => void }) {
+  const t = useTranslations("wizard");
   const [mode, setMode] = useState<WizardMode>("choose");
 
   // Connect existing state
@@ -799,9 +813,9 @@ function ConnectServerWizard({ onClose, onConnected }: { onClose: () => void; on
           setCreateForm((f) => ({ ...f, region: r[0].id || r[0].name }));
         }
       })
-      .catch(() => setCreateError("Failed to load plans. Check API token."))
+      .catch(() => setCreateError(t("failedLoadPlans")))
       .finally(() => setPlansLoading(false));
-  }, [selectedProvider]);
+  }, [selectedProvider, t]);
 
   function handleCopy() {
     navigator.clipboard.writeText(publicKey);
@@ -896,15 +910,15 @@ function ConnectServerWizard({ onClose, onConnected }: { onClose: () => void; on
         <div className="px-6 pt-6 pb-4 border-b border-[var(--border)] shrink-0">
           <div className="flex items-center justify-between mb-1">
             <h2 className="text-lg font-semibold">
-              {mode === "choose" ? "Add Server" :
-               mode === "create" ? (createStep === "provider" ? "Choose Provider" : `Create Server — ${providerInfo?.name || ""}`) :
-               connectStep === "precheck" ? "Security Scan" : "Connect Existing Server"}
+              {mode === "choose" ? t("addServer") :
+               mode === "create" ? (createStep === "provider" ? t("chooseProvider") : t("createServer", { provider: providerInfo?.name || "" })) :
+               connectStep === "precheck" ? t("securityScan") : t("connectExisting")}
             </h2>
             <button onClick={onClose} className="text-[var(--muted)] hover:text-[var(--foreground)] text-xl leading-none">&times;</button>
           </div>
           {mode === "create" && createStep !== "provider" && (
             <p className="text-xs text-[var(--muted)]">
-              Server will be created on your {providerInfo?.name} account and auto-configured
+              {t("serverAutoConfig", { provider: providerInfo?.name || "" })}
             </p>
           )}
         </div>
@@ -1000,6 +1014,7 @@ function ConnectServerWizard({ onClose, onConnected }: { onClose: () => void; on
 function ChooseMode({ hasProviders, onChooseCreate, onChooseConnect }: {
   hasProviders: boolean; onChooseCreate: () => void; onChooseConnect: () => void;
 }) {
+  const t = useTranslations("wizard");
   return (
     <div className="grid grid-cols-2 gap-4">
       <button
@@ -1010,12 +1025,12 @@ function ChooseMode({ hasProviders, onChooseCreate, onChooseConnect }: {
         <div className="w-12 h-12 rounded-xl bg-[var(--accent)]/10 flex items-center justify-center mb-4 group-hover:bg-[var(--accent)]/20 transition-colors">
           <CloudUpload size={24} className="text-[var(--accent)]" />
         </div>
-        <h3 className="font-semibold mb-1">Create New Server</h3>
+        <h3 className="font-semibold mb-1">{t("createNewServer")}</h3>
         <p className="text-xs text-[var(--muted)] mb-3">
-          Deploy a new VPS from Hetzner, DigitalOcean, Vultr, or Linode. Choose plan, region — ready in 60 seconds.
+          {t("createDescription")}
         </p>
         <span className="text-xs text-[var(--accent)] font-medium">
-          {hasProviders ? "Hourly billing, cancel anytime" : "Configure API key first"}
+          {hasProviders ? t("hourlyBilling") : t("configureApiFirst")}
         </span>
       </button>
 
@@ -1026,11 +1041,11 @@ function ChooseMode({ hasProviders, onChooseCreate, onChooseConnect }: {
         <div className="w-12 h-12 rounded-xl bg-[var(--success)]/10 flex items-center justify-center mb-4 group-hover:bg-[var(--success)]/20 transition-colors">
           <Link size={24} className="text-[var(--success)]" />
         </div>
-        <h3 className="font-semibold mb-1">Connect Existing Server</h3>
+        <h3 className="font-semibold mb-1">{t("connectExistingServer")}</h3>
         <p className="text-xs text-[var(--muted)] mb-3">
-          Already have a VPS? Enter IP + root password and we&apos;ll set everything up.
+          {t("connectDescription")}
         </p>
-        <span className="text-xs text-[var(--success)] font-medium">Any provider supported</span>
+        <span className="text-xs text-[var(--success)] font-medium">{t("anyProvider")}</span>
       </button>
     </div>
   );
@@ -1041,6 +1056,9 @@ function ChooseMode({ hasProviders, onChooseCreate, onChooseConnect }: {
 function ChooseProvider({ providers, selected, onSelect, onBack }: {
   providers: CloudProvider[]; selected: string; onSelect: (id: string) => void; onBack: () => void;
 }) {
+  const t = useTranslations("wizard");
+  const tc = useTranslations("common");
+  const ts = useTranslations("servers");
   const available = providers.filter((p) => p.available);
 
   return (
@@ -1070,10 +1088,10 @@ function ChooseProvider({ providers, selected, onSelect, onBack }: {
                 <div className="text-xs text-[var(--muted)]">
                   {p.available ? (
                     <span className="flex items-center gap-1">
-                      <CheckCircle2 size={10} className="text-[var(--success)]" /> Connected
+                      <CheckCircle2 size={10} className="text-[var(--success)]" /> {ts("connected")}
                     </span>
                   ) : (
-                    "API key not configured"
+                    t("apiNotConfigured")
                   )}
                 </div>
               </div>
@@ -1087,7 +1105,7 @@ function ChooseProvider({ providers, selected, onSelect, onBack }: {
 
       <div className="flex justify-between pt-2">
         <button onClick={onBack} className="px-4 py-2.5 text-sm text-[var(--muted)] hover:text-[var(--foreground)] flex items-center gap-2">
-          <ArrowLeft size={14} /> Back
+          <ArrowLeft size={14} /> {tc("back")}
         </button>
       </div>
     </div>
@@ -1118,6 +1136,8 @@ function CreatePlanStep({ plans, regions, loading, form, setForm, sym, provider,
   workloadFilter: string; setWorkloadFilter: (f: string) => void;
   onNext: () => void; onBack: () => void; error: string;
 }) {
+  const t = useTranslations("wizard");
+  const tc = useTranslations("common");
   // Filter and sort plans based on CMS + workload
   const { perfectPlans, goodPlans } = useMemo(() => {
     if (!cmsFilter) return { perfectPlans: plans, goodPlans: [] as Plan[] };
@@ -1152,7 +1172,7 @@ function CreatePlanStep({ plans, regions, loading, form, setForm, sym, provider,
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 size={24} className="animate-spin text-[var(--accent)]" />
-        <span className="ml-3 text-sm text-[var(--muted)]">Loading plans...</span>
+        <span className="ml-3 text-sm text-[var(--muted)]">{t("loadingPlans")}</span>
       </div>
     );
   }
@@ -1162,7 +1182,7 @@ function CreatePlanStep({ plans, regions, loading, form, setForm, sym, provider,
       <div className="space-y-4">
         <div className="text-sm text-[var(--danger)] bg-[var(--danger)]/10 rounded-lg px-4 py-3">{error}</div>
         <button onClick={onBack} className="text-sm text-[var(--muted)] hover:text-[var(--foreground)] flex items-center gap-2">
-          <ArrowLeft size={14} /> Back
+          <ArrowLeft size={14} /> {tc("back")}
         </button>
       </div>
     );
@@ -1174,11 +1194,11 @@ function CreatePlanStep({ plans, regions, loading, form, setForm, sym, provider,
       <div className="lg:w-[340px] shrink-0 space-y-4">
         {/* Server Name */}
         <div>
-          <label className="block text-xs font-medium text-[var(--muted)] mb-1">Server Name</label>
+          <label className="block text-xs font-medium text-[var(--muted)] mb-1">{t("serverName")}</label>
           <input
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
-            placeholder="e.g. production-01"
+            placeholder={t("serverNamePlaceholder")}
             className="w-full bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--accent)]"
             autoFocus
           />
@@ -1186,7 +1206,7 @@ function CreatePlanStep({ plans, regions, loading, form, setForm, sym, provider,
 
         {/* CMS Selection */}
         <div>
-          <label className="block text-xs font-medium text-[var(--muted)] mb-1.5">What will you install?</label>
+          <label className="block text-xs font-medium text-[var(--muted)] mb-1.5">{t("whatToInstall")}</label>
           <div className="grid grid-cols-3 lg:grid-cols-2 gap-1.5">
             {CMS_OPTIONS.map((cms) => (
               <button
@@ -1217,7 +1237,7 @@ function CreatePlanStep({ plans, regions, loading, form, setForm, sym, provider,
         {/* Workload Selection */}
         {cmsFilter && (
           <div>
-            <label className="block text-xs font-medium text-[var(--muted)] mb-1.5">Expected workload</label>
+            <label className="block text-xs font-medium text-[var(--muted)] mb-1.5">{t("expectedWorkload")}</label>
             <div className="flex gap-1.5">
               {WORKLOAD_OPTIONS.map((wl) => {
                 const Icon = wl.icon;
@@ -1234,7 +1254,7 @@ function CreatePlanStep({ plans, regions, loading, form, setForm, sym, provider,
                   >
                     <Icon size={13} className={`mx-auto mb-0.5 ${workloadFilter === wl.id ? "text-[var(--accent)]" : "text-[var(--muted)]"}`} />
                     <span className={`text-[11px] font-semibold block ${workloadFilter === wl.id ? "text-[var(--foreground)]" : "text-[var(--muted)]"}`}>
-                      {wl.label}
+                      {t(wl.id === "startup" ? "startup" : wl.id === "medium" ? "production" : "highTraffic")}
                     </span>
                   </button>
                 );
@@ -1246,7 +1266,7 @@ function CreatePlanStep({ plans, regions, loading, form, setForm, sym, provider,
         {/* Region */}
         {cmsFilter && (
           <div>
-            <label className="block text-xs font-medium text-[var(--muted)] mb-1.5">Region</label>
+            <label className="block text-xs font-medium text-[var(--muted)] mb-1.5">{t("region")}</label>
             <div className="flex gap-1.5 flex-wrap">
               {availableRegions.slice(0, 12).map((r) => (
                 <button
@@ -1269,14 +1289,14 @@ function CreatePlanStep({ plans, regions, loading, form, setForm, sym, provider,
         {/* Navigation */}
         <div className="flex justify-between pt-1">
           <button onClick={onBack} className="px-3 py-2 text-sm text-[var(--muted)] hover:text-[var(--foreground)] flex items-center gap-2">
-            <ArrowLeft size={14} /> Back
+            <ArrowLeft size={14} /> {tc("back")}
           </button>
           <button
             onClick={onNext}
             disabled={!form.name.trim() || !form.plan || !form.region}
             className="px-5 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-40 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
           >
-            Review <ArrowRight size={14} />
+            {tc("review")} <ArrowRight size={14} />
           </button>
         </div>
       </div>
@@ -1286,7 +1306,7 @@ function CreatePlanStep({ plans, regions, loading, form, setForm, sym, provider,
         {cmsFilter ? (
           <>
             <label className="block text-xs font-medium text-[var(--muted)] mb-2">
-              {hasResults ? `Recommended plans (${perfectPlans.length + goodPlans.length})` : "No plans available"}
+              {hasResults ? t("recommendedPlans", { count: perfectPlans.length + goodPlans.length }) : t("noPlansAvailable")}
             </label>
             <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-1">
               {/* Perfect fit */}
@@ -1306,7 +1326,7 @@ function CreatePlanStep({ plans, regions, loading, form, setForm, sym, provider,
               {goodPlans.length > 0 && perfectPlans.length > 0 && (
                 <div className="flex items-center gap-2 py-1">
                   <div className="flex-1 h-px bg-[var(--border)]" />
-                  <span className="text-[10px] text-[var(--muted)]">Also compatible</span>
+                  <span className="text-[10px] text-[var(--muted)]">{t("alsoCompatible")}</span>
                   <div className="flex-1 h-px bg-[var(--border)]" />
                 </div>
               )}
@@ -1323,14 +1343,14 @@ function CreatePlanStep({ plans, regions, loading, form, setForm, sym, provider,
 
               {!hasResults && cmsFilter && (
                 <div className="text-center py-8 text-sm text-[var(--muted)]">
-                  No plans available for this CMS and workload combination with this provider.
+                  {t("noPlansCombination")}
                 </div>
               )}
             </div>
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center text-sm text-[var(--muted)]">
-            Select a CMS to see recommended plans
+            {t("selectCmsForPlans")}
           </div>
         )}
       </div>
@@ -1344,6 +1364,7 @@ function PlanCard({ plan, selected, sym, fitLevel, isBestValue, onClick }: {
   plan: Plan; selected: boolean; sym: string; fitLevel: "perfect" | "good";
   isBestValue?: boolean; onClick: () => void;
 }) {
+  const t = useTranslations("wizard");
   return (
     <button
       type="button"
@@ -1370,13 +1391,13 @@ function PlanCard({ plan, selected, sym, fitLevel, isBestValue, onClick }: {
           {(() => {
             const name = plan.name || "";
             if (name.startsWith("ccx")) return (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 font-medium shrink-0">Dedicated</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 font-medium shrink-0">{t("dedicated")}</span>
             );
             if (name.startsWith("cpx")) return (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-medium shrink-0">Performance</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-medium shrink-0">{t("performance")}</span>
             );
             if (name.startsWith("cx")) return (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-400 font-medium shrink-0">Cost Optimized</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-400 font-medium shrink-0">{t("costOptimized")}</span>
             );
             if ((plan as any).plan_category) return (
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-400 font-medium shrink-0">{(plan as any).plan_category}</span>
@@ -1407,7 +1428,7 @@ function PlanCard({ plan, selected, sym, fitLevel, isBestValue, onClick }: {
         <div className="text-right shrink-0 ml-3 flex items-center gap-2">
           {isBestValue && (
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-white font-bold tracking-wide whitespace-nowrap">
-              BEST VALUE
+              {t("bestValue")}
             </span>
           )}
           <div>
@@ -1432,15 +1453,18 @@ function CreateConfirmStep({ form, plans, regions, provider, providerName, sym, 
   form: any; plans: Plan[]; regions: Region[]; provider: string; providerName: string;
   sym: string; creating: boolean; error: string; onCreate: () => void; onBack: () => void;
 }) {
+  const t = useTranslations("wizard");
+  const tc = useTranslations("common");
+  const ts = useTranslations("servers");
   const plan = plans.find((p) => p.name === form.plan || p.id === form.plan);
   const region = regions.find((r) => (r.name || String(r.id)) === form.region);
 
   return (
     <div className="space-y-5">
       <div className="bg-[var(--background)] border border-[var(--border)] rounded-xl p-5">
-        <h3 className="font-semibold mb-4">Review Configuration</h3>
+        <h3 className="font-semibold mb-4">{t("reviewConfig")}</h3>
         <div className="grid grid-cols-2 gap-y-3 text-sm">
-          <span className="text-[var(--muted)]">Provider</span>
+          <span className="text-[var(--muted)]">{tc("provider")}</span>
           <span className="font-medium flex items-center gap-2">
             <span className="w-5 h-5 rounded text-[9px] font-bold text-white flex items-center justify-center"
               style={{ backgroundColor: providerLogos[provider]?.color || "#666" }}>
@@ -1448,23 +1472,23 @@ function CreateConfirmStep({ form, plans, regions, provider, providerName, sym, 
             </span>
             {providerName}
           </span>
-          <span className="text-[var(--muted)]">Name</span>
+          <span className="text-[var(--muted)]">{tc("name")}</span>
           <span className="font-medium">{form.name}</span>
-          <span className="text-[var(--muted)]">Plan</span>
+          <span className="text-[var(--muted)]">{t("plan")}</span>
           <span className="font-mono font-medium">{form.plan}</span>
-          <span className="text-[var(--muted)]">Specs</span>
+          <span className="text-[var(--muted)]">{ts("specs")}</span>
           <span>{plan?.cores} vCPU, {plan?.memory_gb} GB RAM, {plan?.disk_gb} GB {plan?.disk_type || "SSD"}</span>
           {plan?.transfer_tb ? (
             <>
-              <span className="text-[var(--muted)]">Transfer</span>
+              <span className="text-[var(--muted)]">{t("transfer")}</span>
               <span>{plan.transfer_tb} TB/month</span>
             </>
           ) : null}
-          <span className="text-[var(--muted)]">Location</span>
+          <span className="text-[var(--muted)]">{t("location")}</span>
           <span>{region?.city || form.region}{region?.country ? ` (${region.country})` : ""}</span>
-          <span className="text-[var(--muted)]">OS</span>
+          <span className="text-[var(--muted)]">{t("os")}</span>
           <span>Ubuntu 24.04 LTS</span>
-          <span className="text-[var(--muted)]">Billing</span>
+          <span className="text-[var(--muted)]">{t("billing")}</span>
           <span>
             <span className="text-[var(--accent)] font-bold">{sym}{plan?.price_monthly.toFixed(2)}/mo</span>
             {plan?.price_hourly ? (
@@ -1475,9 +1499,7 @@ function CreateConfirmStep({ form, plans, regions, provider, providerName, sym, 
       </div>
 
       <div className="bg-[var(--accent)]/5 border border-[var(--accent)]/20 rounded-lg p-3 text-xs text-[var(--muted)]">
-        The server will be created on your {providerName} account. We will auto-configure SSH access and
-        install all required dependencies. The server will be ready in about 60 seconds.
-        You are billed directly by {providerName} — hourly, pay only for what you use.
+        {t("serverBillingInfo", { provider: providerName })}
       </div>
 
 
@@ -1487,7 +1509,7 @@ function CreateConfirmStep({ form, plans, regions, provider, providerName, sym, 
 
       <div className="flex justify-between pt-2">
         <button onClick={onBack} className="px-4 py-2.5 text-sm text-[var(--muted)] hover:text-[var(--foreground)] flex items-center gap-2">
-          <ArrowLeft size={14} /> Back
+          <ArrowLeft size={14} /> {tc("back")}
         </button>
         <button
           onClick={onCreate}
@@ -1495,9 +1517,9 @@ function CreateConfirmStep({ form, plans, regions, provider, providerName, sym, 
           className="px-5 py-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-40 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
         >
           {creating ? (
-            <><Loader2 size={14} className="animate-spin" /> Creating Server...</>
+            <><Loader2 size={14} className="animate-spin" /> {t("creatingServer")}</>
           ) : (
-            <><CloudUpload size={14} /> Create Server</>
+            <><CloudUpload size={14} /> {t("createServerBtn")}</>
           )}
         </button>
       </div>
@@ -1511,32 +1533,34 @@ function StepInfo({ form, setForm, providers, canProceed, onNext, onBack }: {
   form: any; setForm: (f: any) => void; providers: { id: string; name: string }[];
   canProceed: boolean; onNext: () => void; onBack?: () => void;
 }) {
+  const t = useTranslations("wizard");
+  const tc = useTranslations("common");
   return (
     <div className="space-y-5">
       <div>
-        <label className="block text-sm font-medium mb-1.5">Server Name</label>
+        <label className="block text-sm font-medium mb-1.5">{t("serverName")}</label>
         <input
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
-          placeholder="e.g. production-01"
+          placeholder={t("serverNamePlaceholder")}
           className="w-full bg-[var(--background)] border border-[var(--border)] rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[var(--accent)] transition-colors"
           autoFocus
         />
-        <p className="text-xs text-[var(--muted)] mt-1">A friendly name to identify this server</p>
+        <p className="text-xs text-[var(--muted)] mt-1">{t("serverNameHint")}</p>
       </div>
 
       <div>
-        <label className="block text-sm font-medium mb-1.5">IP Address</label>
+        <label className="block text-sm font-medium mb-1.5">{t("ipAddress")}</label>
         <input
           value={form.endpoint}
           onChange={(e) => setForm({ ...form, endpoint: e.target.value })}
-          placeholder="e.g. 95.217.123.45"
+          placeholder={t("ipPlaceholder")}
           className="w-full bg-[var(--background)] border border-[var(--border)] rounded-lg px-4 py-2.5 text-sm font-mono focus:outline-none focus:border-[var(--accent)] transition-colors"
         />
       </div>
 
       <div>
-        <label className="block text-sm font-medium mb-1.5">Provider</label>
+        <label className="block text-sm font-medium mb-1.5">{tc("provider")}</label>
         <div className="grid grid-cols-4 gap-2">
           {providers.map((p) => (
             <button
@@ -1558,7 +1582,7 @@ function StepInfo({ form, setForm, providers, canProceed, onNext, onBack }: {
       <div className="flex justify-between pt-2">
         {onBack ? (
           <button onClick={onBack} className="px-4 py-2.5 text-sm text-[var(--muted)] hover:text-[var(--foreground)] flex items-center gap-2">
-            <ArrowLeft size={14} /> Back
+            <ArrowLeft size={14} /> {tc("back")}
           </button>
         ) : <div />}
         <button
@@ -1566,7 +1590,7 @@ function StepInfo({ form, setForm, providers, canProceed, onNext, onBack }: {
           disabled={!canProceed}
           className="px-5 py-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-40 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
         >
-          Next <ArrowRight size={14} />
+          {tc("next")} <ArrowRight size={14} />
         </button>
       </div>
     </div>
@@ -1582,11 +1606,13 @@ function StepConnect({ form, setForm, publicKey, copied, onCopy, showPassword, s
   testing: boolean; testResult: { connected: boolean; hostname: string; error: string } | null;
   onTest: () => void; connecting: boolean; connectError: string; onConnect: () => void; onBack: () => void;
 }) {
+  const t = useTranslations("wizard");
+  const tc = useTranslations("common");
   return (
     <div className="space-y-5">
       {/* Auth method toggle */}
       <div>
-        <label className="block text-sm font-medium mb-2">Connection Method</label>
+        <label className="block text-sm font-medium mb-2">{t("connectionMethod")}</label>
         <div className="flex gap-2">
           <button
             type="button"
@@ -1598,7 +1624,7 @@ function StepConnect({ form, setForm, publicKey, copied, onCopy, showPassword, s
             }`}
           >
             <Zap size={14} className="inline mr-1.5 -mt-0.5" />
-            Root Password (automatic)
+            {t("rootPassword")}
           </button>
           <button
             type="button"
@@ -1610,7 +1636,7 @@ function StepConnect({ form, setForm, publicKey, copied, onCopy, showPassword, s
             }`}
           >
             <Shield size={14} className="inline mr-1.5 -mt-0.5" />
-            SSH Key (manual)
+            {t("sshKeyManual")}
           </button>
         </div>
       </div>
@@ -1618,12 +1644,11 @@ function StepConnect({ form, setForm, publicKey, copied, onCopy, showPassword, s
       {form.usePassword ? (
         <div className="space-y-4">
           <div className="bg-[var(--accent)]/5 border border-[var(--accent)]/20 rounded-lg p-3 text-xs text-[var(--muted)]">
-            We&apos;ll use the password once to install our SSH key, then switch to key-based auth.
-            The password is never stored.
+            {t("passwordHint")}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-[var(--muted)] mb-1">SSH User</label>
+              <label className="block text-xs text-[var(--muted)] mb-1">{t("sshUser")}</label>
               <input
                 value={form.ssh_user}
                 onChange={(e) => setForm({ ...form, ssh_user: e.target.value })}
@@ -1631,13 +1656,13 @@ function StepConnect({ form, setForm, publicKey, copied, onCopy, showPassword, s
               />
             </div>
             <div>
-              <label className="block text-xs text-[var(--muted)] mb-1">Root Password</label>
+              <label className="block text-xs text-[var(--muted)] mb-1">{t("rootPasswordLabel")}</label>
               <div className="relative">
                 <input
                   type={showPassword ? "text" : "password"}
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  placeholder="Server root password"
+                  placeholder={t("rootPasswordPlaceholder")}
                   className="w-full bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2 pr-10 text-sm focus:outline-none focus:border-[var(--accent)]"
                 />
                 <button
@@ -1654,11 +1679,11 @@ function StepConnect({ form, setForm, publicKey, copied, onCopy, showPassword, s
       ) : (
         <div className="space-y-3">
           <p className="text-xs text-[var(--muted)]">
-            Add this public key to <code className="bg-[var(--background)] px-1 rounded">~/.ssh/authorized_keys</code> on your server:
+            {t("sshKeyInstruction")}
           </p>
           <div className="relative">
             <pre className="bg-[var(--background)] border border-[var(--border)] rounded-lg p-3 text-xs font-mono break-all whitespace-pre-wrap max-h-20 overflow-y-auto">
-              {publicKey || "Loading..."}
+              {publicKey || tc("loading")}
             </pre>
             <button
               onClick={onCopy}
@@ -1678,19 +1703,19 @@ function StepConnect({ form, setForm, publicKey, copied, onCopy, showPassword, s
           className="px-4 py-2 bg-[var(--background)] border border-[var(--border)] hover:border-[var(--accent)]/50 disabled:opacity-40 rounded-lg text-sm transition-colors flex items-center gap-2"
         >
           {testing ? <Loader2 size={14} className="animate-spin" /> : <Wifi size={14} />}
-          Test Connection
+          {t("testConnection")}
         </button>
         {testResult && (
           <div className={`flex items-center gap-1.5 text-sm ${testResult.connected ? "text-[var(--success)]" : "text-[var(--danger)]"}`}>
             {testResult.connected ? (
               <>
                 <CheckCircle2 size={16} />
-                Connected to <span className="font-mono font-semibold">{testResult.hostname}</span>
+                {t("connectedTo")} <span className="font-mono font-semibold">{testResult.hostname}</span>
               </>
             ) : (
               <>
                 <XCircle size={16} />
-                <span className="text-xs">{testResult.error || "Connection failed"}</span>
+                <span className="text-xs">{testResult.error || t("connectionFailed")}</span>
               </>
             )}
           </div>
@@ -1707,7 +1732,7 @@ function StepConnect({ form, setForm, publicKey, copied, onCopy, showPassword, s
           onClick={onBack}
           className="px-4 py-2.5 text-sm text-[var(--muted)] hover:text-[var(--foreground)] flex items-center gap-2"
         >
-          <ArrowLeft size={14} /> Back
+          <ArrowLeft size={14} /> {tc("back")}
         </button>
         <button
           onClick={onConnect}
@@ -1715,9 +1740,9 @@ function StepConnect({ form, setForm, publicKey, copied, onCopy, showPassword, s
           className="px-5 py-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-40 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
         >
           {connecting ? (
-            <><Loader2 size={14} className="animate-spin" /> Scanning...</>
+            <><Loader2 size={14} className="animate-spin" /> {t("scanning")}</>
           ) : (
-            <><Scan size={14} /> Scan &amp; Connect <ArrowRight size={14} /></>
+            <><Scan size={14} /> {t("scanAndConnect")} <ArrowRight size={14} /></>
           )}
         </button>
       </div>
@@ -1747,6 +1772,8 @@ function StepPrecheck({ precheckResult, sanitizeResult, sanitizing, connecting, 
   precheckResult: any; sanitizeResult: any; sanitizing: boolean; connecting: boolean;
   connectError: string; onSanitize: () => void; onProceed: () => void; onBack: () => void;
 }) {
+  const t = useTranslations("wizard");
+  const tc = useTranslations("common");
   if (!precheckResult) return null;
 
   const { safe, risk_level, threats, system_info, recommendations } = precheckResult;
@@ -1775,19 +1802,17 @@ function StepPrecheck({ precheckResult, sanitizeResult, sanitizing, connecting, 
           </div>
           <div>
             <h3 className="font-semibold text-lg">
-              {risk_level === "clean" ? "Server is Clean" :
-               risk_level === "low" ? "Minor Issues Detected" :
-               risk_level === "medium" ? "Security Issues Found" :
-               risk_level === "high" ? "Serious Threats Detected" :
-               risk_level === "critical" ? "Critical Threats Detected" :
-               "Scan Incomplete"}
+              {risk_level === "clean" ? t("precheck.serverClean") :
+               risk_level === "low" ? t("precheck.minorIssues") :
+               risk_level === "medium" ? t("precheck.securityIssues") :
+               risk_level === "high" ? t("precheck.seriousThreats") :
+               risk_level === "critical" ? t("precheck.criticalThreats") :
+               t("precheck.scanIncomplete")}
             </h3>
             <p className="text-sm text-[var(--muted)]">
               {risk_level === "clean"
-                ? "No threats detected. Server is safe to provision."
-                : `${threats.length} issue${threats.length > 1 ? "s" : ""} found. ${
-                    safe ? "Safe to proceed — issues are minor." : "Sanitization recommended before provisioning."
-                  }`
+                ? t("precheck.noThreats")
+                : t("precheck.issuesFound", { count: threats.length, safe: safe ? "true" : "false" })
               }
             </p>
           </div>
@@ -1797,14 +1822,14 @@ function StepPrecheck({ precheckResult, sanitizeResult, sanitizing, connecting, 
       {/* System Info */}
       {system_info && (system_info.os || system_info.kernel) && (
         <div className="bg-[var(--background)] border border-[var(--border)] rounded-lg p-3">
-          <div className="text-xs font-medium text-[var(--muted)] mb-2">Server Details</div>
+          <div className="text-xs font-medium text-[var(--muted)] mb-2">{t("precheck.serverDetails")}</div>
           <div className="grid grid-cols-2 gap-2 text-xs">
             {system_info.os && <><span className="text-[var(--muted)]">OS</span><span className="font-mono">{system_info.os}</span></>}
             {system_info.kernel && <><span className="text-[var(--muted)]">Kernel</span><span className="font-mono">{system_info.kernel}</span></>}
             {system_info.arch && <><span className="text-[var(--muted)]">Architecture</span><span className="font-mono">{system_info.arch}</span></>}
             {system_info.uptime && <><span className="text-[var(--muted)]">Uptime</span><span>{system_info.uptime}</span></>}
             {system_info.existing_containers && (
-              <><span className="text-[var(--muted)]">Docker</span><span>{system_info.existing_containers.length} container(s) running</span></>
+              <><span className="text-[var(--muted)]">Docker</span><span>{t("precheck.containersRunning", { count: system_info.existing_containers.length })}</span></>
             )}
           </div>
         </div>
@@ -1840,7 +1865,7 @@ function StepPrecheck({ precheckResult, sanitizeResult, sanitizing, connecting, 
           <div className="flex items-center gap-2 mb-2">
             <Sparkles size={14} className={sanitizeResult.success ? "text-emerald-400" : "text-orange-400"} />
             <span className="text-sm font-medium">
-              {sanitizeResult.success ? "Sanitization Complete" : "Partial Sanitization"}
+              {sanitizeResult.success ? t("precheck.sanitizationComplete") : t("precheck.partialSanitization")}
             </span>
           </div>
           <p className="text-xs text-[var(--muted)] mb-2">{sanitizeResult.message}</p>
@@ -1860,7 +1885,7 @@ function StepPrecheck({ precheckResult, sanitizeResult, sanitizing, connecting, 
       {/* Recommendations */}
       {safe && recommendations?.length > 0 && (
         <div className="bg-[var(--accent)]/5 border border-[var(--accent)]/20 rounded-lg p-3">
-          <div className="text-xs font-medium mb-2">During provisioning, we will:</div>
+          <div className="text-xs font-medium mb-2">{t("precheck.duringProvisioning")}</div>
           <div className="space-y-1">
             {recommendations.map((r: string, i: number) => (
               <div key={i} className="flex items-center gap-2 text-xs text-[var(--muted)]">
@@ -1879,7 +1904,7 @@ function StepPrecheck({ precheckResult, sanitizeResult, sanitizing, connecting, 
       {/* Actions */}
       <div className="flex justify-between pt-2">
         <button onClick={onBack} className="px-4 py-2.5 text-sm text-[var(--muted)] hover:text-[var(--foreground)] flex items-center gap-2">
-          <ArrowLeft size={14} /> Back
+          <ArrowLeft size={14} /> {tc("back")}
         </button>
         <div className="flex gap-2">
           {!safe && !sanitizeResult?.success && (
@@ -1889,9 +1914,9 @@ function StepPrecheck({ precheckResult, sanitizeResult, sanitizing, connecting, 
               className="px-4 py-2.5 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/40 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 text-orange-300"
             >
               {sanitizing ? (
-                <><Loader2 size={14} className="animate-spin" /> Sanitizing...</>
+                <><Loader2 size={14} className="animate-spin" /> {t("precheck.sanitizing")}</>
               ) : (
-                <><Sparkles size={14} /> Sanitize Server</>
+                <><Sparkles size={14} /> {t("precheck.sanitizeServer")}</>
               )}
             </button>
           )}
@@ -1899,12 +1924,12 @@ function StepPrecheck({ precheckResult, sanitizeResult, sanitizing, connecting, 
             onClick={onProceed}
             disabled={connecting || sanitizing || (risk_level === "critical" && !sanitizeResult?.success)}
             className="px-5 py-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-40 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
-            title={risk_level === "critical" && !sanitizeResult?.success ? "Sanitize the server first" : ""}
+            title={risk_level === "critical" && !sanitizeResult?.success ? t("precheck.sanitizeFirst") : ""}
           >
             {connecting ? (
-              <><Loader2 size={14} className="animate-spin" /> Connecting...</>
+              <><Loader2 size={14} className="animate-spin" /> {t("connecting")}</>
             ) : (
-              <><ShieldCheck size={14} /> {safe ? "Proceed" : "Proceed Anyway"} <ArrowRight size={14} /></>
+              <><ShieldCheck size={14} /> {safe ? t("precheck.proceed") : t("precheck.proceedAnyway")} <ArrowRight size={14} /></>
             )}
           </button>
         </div>
@@ -1916,6 +1941,7 @@ function StepPrecheck({ precheckResult, sanitizeResult, sanitizing, connecting, 
 // ─── Step: Done ──────────────────────────────────────────────────────
 
 function StepDone({ server, onFinish, isCreate }: { server: any; onFinish: () => void; isCreate?: boolean }) {
+  const t = useTranslations("wizard");
   const isOnline = server?.status === "online";
   const isProvisioning = server?.status === "provisioning";
 
@@ -1932,26 +1958,26 @@ function StepDone({ server, onFinish, isCreate }: { server: any; onFinish: () =>
       </div>
       <h3 className="text-lg font-semibold mb-2">
         {isCreate
-          ? (isProvisioning ? "Server Created!" : isOnline ? "Server Ready!" : "Server Created")
-          : (isOnline ? "Server Connected!" : "Server Added")
+          ? (isProvisioning ? t("serverCreated") : isOnline ? t("serverReady") : t("serverCreated"))
+          : (isOnline ? t("serverConnected") : t("serverAdded"))
         }
       </h3>
       <p className="text-sm text-[var(--muted)] mb-2">
         {isCreate ? (
           isProvisioning
-            ? `${server?.name} is being set up at ${server?.endpoint || "..."}.`
+            ? t("serverBeingSetup", { name: server?.name || "", endpoint: server?.endpoint || "..." })
             : isOnline
-              ? `${server?.name} is online and ready.`
-              : `${server?.name || "Server"} was created but encountered an issue.`
+              ? t("serverOnline", { name: server?.name || "" })
+              : t("serverCreatedIssue", { name: server?.name || "Server" })
         ) : (
           isOnline
-            ? `${server?.name} is online and being configured.`
-            : `${server?.name || "Server"} was added but connection failed. Check credentials and try again.`
+            ? t("serverOnlineConfiguring", { name: server?.name || "" })
+            : t("serverAddedFailed", { name: server?.name || "Server" })
         )}
       </p>
       {(isOnline || isProvisioning) && (
         <p className="text-xs text-[var(--muted)] mb-6">
-          Your server environment is being prepared automatically. It will be ready to deploy instances shortly.
+          {t("serverEnvironmentPreparing")}
         </p>
       )}
       {server?.endpoint && (
@@ -1961,7 +1987,7 @@ function StepDone({ server, onFinish, isCreate }: { server: any; onFinish: () =>
         onClick={onFinish}
         className="px-6 py-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-sm font-medium transition-colors"
       >
-        Go to Dashboard
+        {t("goToDashboard")}
       </button>
     </div>
   );

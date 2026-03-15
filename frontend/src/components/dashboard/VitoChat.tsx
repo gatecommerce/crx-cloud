@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { vitoApi } from "@/lib/api";
 import { Send, X, Bot, User } from "lucide-react";
 
@@ -11,12 +12,13 @@ interface Message {
 }
 
 export function VitoChat() {
+  const t = useTranslations("vito");
   const [isOpen, setIsOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      content: "Ciao! Sono Vito, il tuo assistente AI per CRX Cloud. Posso aiutarti a gestire server, deployare CMS, analizzare problemi e molto altro. Cosa ti serve?",
+      content: t("greeting"),
     },
   ]);
   const [loading, setLoading] = useState(false);
@@ -47,7 +49,7 @@ export function VitoChat() {
     } catch {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "Mi dispiace, non sono riuscito a rispondere. Riprova tra poco." },
+        { role: "assistant", content: t("error") },
       ]);
     } finally {
       setLoading(false);
@@ -63,7 +65,6 @@ export function VitoChat() {
 
   return (
     <>
-      {/* Toggle button */}
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
@@ -73,18 +74,16 @@ export function VitoChat() {
         </button>
       )}
 
-      {/* Chat panel */}
       {isOpen && (
         <div className="fixed bottom-6 right-6 w-96 h-[500px] bg-[var(--card)] border border-[var(--border)] rounded-2xl shadow-2xl flex flex-col overflow-hidden z-50">
-          {/* Header */}
           <div className="px-4 py-3 border-b border-[var(--border)] flex items-center justify-between bg-[var(--accent)]/5">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-[var(--accent)] rounded-full flex items-center justify-center">
                 <Bot size={16} />
               </div>
               <div>
-                <div className="text-sm font-semibold">Vito</div>
-                <div className="text-xs text-[var(--success)]">online</div>
+                <div className="text-sm font-semibold">{t("name")}</div>
+                <div className="text-xs text-[var(--success)]">{t("online")}</div>
               </div>
             </div>
             <button onClick={() => setIsOpen(false)} className="text-[var(--muted)] hover:text-[var(--foreground)]">
@@ -92,7 +91,6 @@ export function VitoChat() {
             </button>
           </div>
 
-          {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {messages.map((msg, i) => (
               <div key={i} className={`flex gap-2 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
@@ -141,7 +139,6 @@ export function VitoChat() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input */}
           <div className="p-3 border-t border-[var(--border)]">
             <div className="flex gap-2">
               <input
@@ -149,7 +146,7 @@ export function VitoChat() {
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Chiedi a Vito..."
+                placeholder={t("placeholder")}
                 className="flex-1 bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--accent)]"
                 disabled={loading}
               />

@@ -60,6 +60,129 @@ export const serversApi = {
   reboot: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/reboot`, { method: "POST" }),
   remove: (id: string, destroyCloud?: boolean) =>
     apiFetch<{ detail: string }>(`/api/v1/servers/${id}${destroyCloud ? "?destroy_cloud=true" : ""}`, { method: "DELETE" }),
+  refreshSpecs: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/refresh-specs`, { method: "POST" }),
+  // Enhanced metrics
+  detailedMetrics: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/metrics/detailed`),
+  // Services
+  services: (id: string) => apiFetch<any[]>(`/api/v1/servers/${id}/services`),
+  serviceAction: (id: string, serviceName: string, action: string) =>
+    apiFetch<any>(`/api/v1/servers/${id}/services/${serviceName}/action`, {
+      method: "POST", body: JSON.stringify({ action }),
+    }),
+  // Firewall
+  firewall: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/firewall`),
+  addFirewallRule: (id: string, data: { port: number; protocol?: string; source?: string; action?: string; comment?: string }) =>
+    apiFetch<any>(`/api/v1/servers/${id}/firewall`, { method: "POST", body: JSON.stringify(data) }),
+  deleteFirewallRule: (id: string, ruleNumber: number) =>
+    apiFetch<any>(`/api/v1/servers/${id}/firewall/${ruleNumber}`, { method: "DELETE" }),
+  toggleFirewall: (id: string, enabled: boolean) =>
+    apiFetch<any>(`/api/v1/servers/${id}/firewall/toggle`, { method: "POST", body: JSON.stringify({ enabled }) }),
+  // Cron Jobs
+  cronJobs: (id: string) => apiFetch<any[]>(`/api/v1/servers/${id}/cron`),
+  addCronJob: (id: string, data: { schedule: string; command: string }) =>
+    apiFetch<any>(`/api/v1/servers/${id}/cron`, { method: "POST", body: JSON.stringify(data) }),
+  deleteCronJob: (id: string, lineNumber: number) =>
+    apiFetch<any>(`/api/v1/servers/${id}/cron/${lineNumber}`, { method: "DELETE" }),
+  // Server Logs
+  serverLogs: (id: string, type: string = "syslog", lines: number = 100) =>
+    apiFetch<any>(`/api/v1/servers/${id}/logs?type=${type}&lines=${lines}`),
+  // Processes
+  processes: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/processes`),
+  killProcess: (id: string, pid: number, signal: string = "TERM") =>
+    apiFetch<any>(`/api/v1/servers/${id}/processes/${pid}/kill`, {
+      method: "POST", body: JSON.stringify({ signal }),
+    }),
+  // SSH Keys
+  sshKeys: (id: string) => apiFetch<any[]>(`/api/v1/servers/${id}/ssh-keys`),
+  addSshKey: (id: string, publicKey: string) =>
+    apiFetch<any>(`/api/v1/servers/${id}/ssh-keys`, { method: "POST", body: JSON.stringify({ public_key: publicKey }) }),
+  deleteSshKey: (id: string, index: number) =>
+    apiFetch<any>(`/api/v1/servers/${id}/ssh-keys/${index}`, { method: "DELETE" }),
+  // PostgreSQL
+  databases: (id: string) => apiFetch<any[]>(`/api/v1/servers/${id}/databases`),
+  postgresConfig: (id: string) => apiFetch<any[]>(`/api/v1/servers/${id}/postgres-config`),
+  updatePostgresConfig: (id: string, params: Record<string, string>) =>
+    apiFetch<any>(`/api/v1/servers/${id}/postgres-config`, { method: "PATCH", body: JSON.stringify({ params }) }),
+  databaseStats: (id: string, dbName: string) => apiFetch<any>(`/api/v1/servers/${id}/databases/${dbName}/stats`),
+  // Activity
+  activity: (id: string, limit: number = 50) => apiFetch<any>(`/api/v1/servers/${id}/activity?limit=${limit}`),
+  // Settings
+  updateSettings: (id: string, data: Record<string, any>) =>
+    apiFetch<any>(`/api/v1/servers/${id}/settings`, { method: "PATCH", body: JSON.stringify(data) }),
+  // Uptime
+  uptime: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/uptime`),
+  // Hardware upgrade
+  upgradePlans: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/upgrade-plans`),
+  resize: (id: string, targetPlan: string, upgradeDisk: boolean = true) =>
+    apiFetch<any>(`/api/v1/servers/${id}/resize`, { method: "POST", body: JSON.stringify({ target_plan: targetPlan, upgrade_disk: upgradeDisk }) }),
+  // Monitoring History
+  metricsHistory: (id: string, period: string = "1h") =>
+    apiFetch<any>(`/api/v1/servers/${id}/metrics/history?period=${period}`),
+  alertsConfig: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/alerts/config`),
+  updateAlertsConfig: (id: string, config: Record<string, any>) =>
+    apiFetch<any>(`/api/v1/servers/${id}/alerts/config`, { method: "PATCH", body: JSON.stringify(config) }),
+  alertsStatus: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/alerts/status`),
+  installSysstat: (id: string) =>
+    apiFetch<any>(`/api/v1/servers/${id}/install-sysstat`, { method: "POST" }),
+  // Fail2ban Management
+  fail2ban: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/fail2ban`),
+  fail2banUnban: (id: string, jail: string, ip: string) =>
+    apiFetch<any>(`/api/v1/servers/${id}/fail2ban/${jail}/unban`, { method: "POST", body: JSON.stringify({ ip }) }),
+  fail2banBan: (id: string, jail: string, ip: string) =>
+    apiFetch<any>(`/api/v1/servers/${id}/fail2ban/${jail}/ban`, { method: "POST", body: JSON.stringify({ ip }) }),
+  fail2banToggle: (id: string, enabled: boolean) =>
+    apiFetch<any>(`/api/v1/servers/${id}/fail2ban/toggle`, { method: "POST", body: JSON.stringify({ enabled }) }),
+  // SSL / Let's Encrypt
+  sslCertificates: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/ssl`),
+  sslIssue: (id: string, data: { domain: string; email?: string }) =>
+    apiFetch<any>(`/api/v1/servers/${id}/ssl/issue`, { method: "POST", body: JSON.stringify(data) }),
+  sslRenew: (id: string) =>
+    apiFetch<any>(`/api/v1/servers/${id}/ssl/renew`, { method: "POST" }),
+  sslRevoke: (id: string, domain: string) =>
+    apiFetch<any>(`/api/v1/servers/${id}/ssl/${domain}`, { method: "DELETE" }),
+  sslInstallCertbot: (id: string) =>
+    apiFetch<any>(`/api/v1/servers/${id}/ssl/install-certbot`, { method: "POST" }),
+  // Security Scanning
+  securityScan: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/security/scan`),
+  securityFix: (id: string, actions: string[]) =>
+    apiFetch<any>(`/api/v1/servers/${id}/security/fix`, { method: "POST", body: JSON.stringify({ actions }) }),
+  securityScanHistory: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/security/scan/history`),
+  // Nginx Sites Management
+  nginxSites: (id: string) => apiFetch<any[]>(`/api/v1/servers/${id}/nginx/sites`),
+  nginxSiteConfig: (id: string, siteName: string) =>
+    apiFetch<any>(`/api/v1/servers/${id}/nginx/sites/${siteName}/config`),
+  nginxToggleSite: (id: string, siteName: string) =>
+    apiFetch<any>(`/api/v1/servers/${id}/nginx/sites/${siteName}/toggle`, { method: "POST" }),
+  nginxTest: (id: string) =>
+    apiFetch<any>(`/api/v1/servers/${id}/nginx/test`, { method: "POST" }),
+  // Docker Container Management
+  dockerContainers: (id: string) => apiFetch<any[]>(`/api/v1/servers/${id}/docker/containers`),
+  dockerContainerAction: (id: string, containerId: string, action: string) =>
+    apiFetch<any>(`/api/v1/servers/${id}/docker/containers/${containerId}/action`, {
+      method: "POST", body: JSON.stringify({ action }),
+    }),
+  dockerContainerLogs: (id: string, containerId: string, lines: number = 100) =>
+    apiFetch<any>(`/api/v1/servers/${id}/docker/containers/${containerId}/logs?lines=${lines}`),
+  // SSH Hardening
+  sshHardening: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/ssh/hardening`),
+  updateSshHardening: (id: string, data: Record<string, any>) =>
+    apiFetch<any>(`/api/v1/servers/${id}/ssh/hardening`, { method: "PATCH", body: JSON.stringify(data) }),
+  // Swap Management
+  swapInfo: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/swap`),
+  createSwap: (id: string, sizeMb: number) =>
+    apiFetch<any>(`/api/v1/servers/${id}/swap/create`, { method: "POST", body: JSON.stringify({ size_mb: sizeMb }) }),
+  removeSwap: (id: string) =>
+    apiFetch<any>(`/api/v1/servers/${id}/swap`, { method: "DELETE" }),
+  updateSwappiness: (id: string, value: number) =>
+    apiFetch<any>(`/api/v1/servers/${id}/swap/swappiness`, { method: "PATCH", body: JSON.stringify({ value }) }),
+  // Quick Actions
+  quickActions: (id: string) => apiFetch<any[]>(`/api/v1/servers/${id}/quick-actions`),
+  executeQuickAction: (id: string, action: string) =>
+    apiFetch<any>(`/api/v1/servers/${id}/quick-actions`, { method: "POST", body: JSON.stringify({ action }) }),
+  // Network
+  networkOverview: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/network`),
+  // Resource Forecasting
+  forecast: (id: string) => apiFetch<any>(`/api/v1/servers/${id}/forecast`),
 };
 
 // Instance API
@@ -104,16 +227,132 @@ export const instancesApi = {
     apiFetch<any>(`/api/v1/instances/${id}/addons/check-compatibility`),
   getOcaCatalog: () =>
     apiFetch<any[]>(`/api/v1/instances/oca-catalog`),
+  // Marketplace
+  getMarketplace: (id: string, params?: { search?: string; category?: string; source?: string; page?: number; per_page?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.search) qs.set("search", params.search);
+    if (params?.category) qs.set("category", params.category);
+    if (params?.source) qs.set("source", params.source);
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.per_page) qs.set("per_page", String(params.per_page));
+    return apiFetch<any>(`/api/v1/instances/${id}/marketplace?${qs}`);
+  },
+  installMarketplaceModule: (id: string, data: { repo_url: string; module_name: string; branch?: string }) =>
+    apiFetch<any>(`/api/v1/instances/${id}/marketplace/install`, { method: "POST", body: JSON.stringify(data) }),
+  uninstallMarketplaceModule: (id: string, addonId: string) =>
+    apiFetch<any>(`/api/v1/instances/${id}/marketplace/${addonId}`, { method: "DELETE" }),
+  rebuildMarketplace: (id: string) =>
+    apiFetch<any>(`/api/v1/instances/${id}/marketplace/rebuild`, { method: "POST" }),
+  uploadToGithub: (id: string, data: { repo_name: string; description?: string }) =>
+    apiFetch<any>(`/api/v1/instances/${id}/addons/upload-to-github`, { method: "POST", body: JSON.stringify(data) }),
+  // Odoo Config (odoo.conf)
+  getOdooConfig: (id: string, showAll: boolean = false) =>
+    apiFetch<any>(`/api/v1/instances/${id}/odoo-config?show_all=${showAll}`),
+  updateOdooConfig: (id: string, params: Record<string, any>) =>
+    apiFetch<any>(`/api/v1/instances/${id}/odoo-config`, { method: "PATCH", body: JSON.stringify({ params }) }),
+  applyConfigPreset: (id: string, presetName: string) =>
+    apiFetch<any>(`/api/v1/instances/${id}/odoo-config/preset/${presetName}`, { method: "POST" }),
+  // Real-time Monitoring
+  getMonitoring: (id: string) =>
+    apiFetch<any>(`/api/v1/instances/${id}/monitoring`),
+  getQuickMetrics: (id: string) =>
+    apiFetch<any>(`/api/v1/instances/${id}/monitoring/quick`),
+  // Staging
+  getStaging: (id: string) =>
+    apiFetch<any>(`/api/v1/instances/${id}/staging`),
+  createStaging: (id: string) =>
+    apiFetch<any>(`/api/v1/instances/${id}/staging`, { method: "POST" }),
+  syncStaging: (id: string) =>
+    apiFetch<any>(`/api/v1/instances/${id}/staging/sync`, { method: "POST" }),
+  deleteStaging: (id: string) =>
+    apiFetch<any>(`/api/v1/instances/${id}/staging`, { method: "DELETE" }),
+};
+
+// GitHub OAuth API
+export const githubApi = {
+  status: () => apiFetch<{ connected: boolean; username: string; avatar_url: string }>("/api/v1/settings/github/status"),
+  authorize: (returnTo?: string) => {
+    const qs = returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : "";
+    return apiFetch<{ authorize_url: string }>(`/api/v1/settings/github/authorize${qs}`);
+  },
+  disconnect: () => apiFetch<{ ok: boolean }>("/api/v1/settings/github/disconnect", { method: "POST" }),
+  repos: (params?: { search?: string; page?: number; per_page?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.search) qs.set("search", params.search);
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.per_page) qs.set("per_page", String(params.per_page));
+    return apiFetch<{ repos: any[]; total: number; page: number }>(`/api/v1/settings/github/repos?${qs}`);
+  },
+  branches: (owner: string, repo: string) =>
+    apiFetch<{ branches: { name: string; protected: boolean }[] }>(`/api/v1/settings/github/repos/${owner}/${repo}/branches`),
 };
 
 // Backup API
 export const backupsApi = {
   list: (instanceId?: string) =>
     apiFetch<any[]>(instanceId ? `/api/v1/backups/?instance_id=${instanceId}` : "/api/v1/backups"),
-  create: (instanceId: string) =>
-    apiFetch<any>(`/api/v1/backups/${instanceId}`, { method: "POST" }),
-  restore: (backupId: string) =>
-    apiFetch<any>(`/api/v1/backups/${backupId}/restore`, { method: "POST" }),
+  stats: (instanceId: string) =>
+    apiFetch<{ total_backups: number; completed_backups: number; failed_backups: number; total_size_mb: number; last_backup_at: string | null; last_backup_status: string | null }>(
+      `/api/v1/backups/stats?instance_id=${instanceId}`
+    ),
+  create: (instanceId: string, includeFilestore: boolean = true) =>
+    apiFetch<any>(`/api/v1/backups/${instanceId}`, {
+      method: "POST",
+      body: JSON.stringify({ include_filestore: includeFilestore }),
+    }),
+  restore: (backupId: string, includeFilestore: boolean = true) =>
+    apiFetch<any>(`/api/v1/backups/${backupId}/restore`, {
+      method: "POST",
+      body: JSON.stringify({ include_filestore: includeFilestore }),
+    }),
+  cancel: (backupId: string) =>
+    apiFetch<any>(`/api/v1/backups/${backupId}/cancel`, { method: "POST" }),
+  remove: (backupId: string) =>
+    apiFetch<any>(`/api/v1/backups/${backupId}`, { method: "DELETE" }),
+};
+
+// Migrations API — server-to-server migration
+export const migrationsApi = {
+  list: () => apiFetch<any[]>("/api/v1/migrations"),
+  get: (id: string) => apiFetch<any>(`/api/v1/migrations/${id}`),
+  create: (data: { source_instance_id: string; target_server_id: string; strategy?: string; include_filestore?: boolean; target_database?: string }) =>
+    apiFetch<any>("/api/v1/migrations", { method: "POST", body: JSON.stringify(data) }),
+  estimate: (instanceId: string, targetServerId: string) =>
+    apiFetch<any>(`/api/v1/migrations/${instanceId}/estimate?target_server_id=${targetServerId}`, { method: "POST" }),
+};
+
+// Clones API — staging, development, testing clones
+export const clonesApi = {
+  list: (sourceInstanceId?: string) =>
+    apiFetch<any[]>(sourceInstanceId ? `/api/v1/clones?source_instance_id=${sourceInstanceId}` : "/api/v1/clones"),
+  get: (id: string) => apiFetch<any>(`/api/v1/clones/${id}`),
+  create: (data: { source_instance_id: string; clone_type?: string; name?: string; clone_database?: string; neutralize?: boolean; base_url?: string }) =>
+    apiFetch<any>("/api/v1/clones", { method: "POST", body: JSON.stringify(data) }),
+  start: (id: string) => apiFetch<any>(`/api/v1/clones/${id}/start`, { method: "POST" }),
+  stop: (id: string) => apiFetch<any>(`/api/v1/clones/${id}/stop`, { method: "POST" }),
+  sync: (id: string) => apiFetch<any>(`/api/v1/clones/${id}/sync`, { method: "POST" }),
+  destroy: (id: string) => apiFetch<any>(`/api/v1/clones/${id}`, { method: "DELETE" }),
+};
+
+// Backup Schedules API — automated periodic backups
+export const backupSchedulesApi = {
+  list: (instanceId?: string) =>
+    apiFetch<any[]>(instanceId ? `/api/v1/backup-schedules?instance_id=${instanceId}` : "/api/v1/backup-schedules"),
+  get: (id: string) => apiFetch<any>(`/api/v1/backup-schedules/${id}`),
+  create: (data: {
+    instance_id: string; cron_expression?: string; timezone?: string; backup_format?: string;
+    include_filestore?: boolean; destination_ids?: string[]; keep_daily?: number; keep_weekly?: number;
+    keep_monthly?: number; notify_on_success?: boolean; notify_on_failure?: boolean; notification_channels?: string[];
+    verify_after_backup?: boolean; stop_instance_during_backup?: boolean; pre_backup_command?: string; post_backup_command?: string;
+  }) => apiFetch<any>("/api/v1/backup-schedules", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: string, data: Record<string, any>) =>
+    apiFetch<any>(`/api/v1/backup-schedules/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  toggle: (id: string) =>
+    apiFetch<any>(`/api/v1/backup-schedules/${id}/toggle`, { method: "POST" }),
+  remove: (id: string) =>
+    apiFetch<any>(`/api/v1/backup-schedules/${id}`, { method: "DELETE" }),
+  runNow: (id: string) =>
+    apiFetch<any>(`/api/v1/backup-schedules/${id}/run`, { method: "POST" }),
 };
 
 // Cloud Provider API — unified multi-provider
@@ -173,4 +412,63 @@ export const settingsApi = {
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
+};
+
+// Database Explorer API
+export const databaseApi = {
+  // Tables
+  listTables: (instanceId: string) =>
+    apiFetch<any[]>(`/api/v1/database/${instanceId}/tables`),
+  getColumns: (instanceId: string, table: string) =>
+    apiFetch<any[]>(`/api/v1/database/${instanceId}/tables/${table}/columns`),
+  // Records (POST for body params)
+  getRecords: (instanceId: string, table: string, params: {
+    page?: number; page_size?: number; order_by?: string; order_dir?: string;
+    search?: string; filters?: Record<string, string>;
+  } = {}) =>
+    apiFetch<any>(`/api/v1/database/${instanceId}/tables/${table}/records`, {
+      method: "POST", body: JSON.stringify(params),
+    }),
+  updateRecord: (instanceId: string, table: string, recordId: number, updates: Record<string, any>) =>
+    apiFetch<any>(`/api/v1/database/${instanceId}/tables/${table}/records/${recordId}`, {
+      method: "PATCH", body: JSON.stringify({ updates }),
+    }),
+  insertRecord: (instanceId: string, table: string, values: Record<string, any>) =>
+    apiFetch<any>(`/api/v1/database/${instanceId}/tables/${table}/records`, {
+      method: "PUT", body: JSON.stringify({ values }),
+    }),
+  deleteRecord: (instanceId: string, table: string, recordId: number) =>
+    apiFetch<any>(`/api/v1/database/${instanceId}/tables/${table}/records/${recordId}`, {
+      method: "DELETE",
+    }),
+  // SQL Console
+  executeQuery: (instanceId: string, sql: string, maxRows: number = 500) =>
+    apiFetch<any>(`/api/v1/database/${instanceId}/query`, {
+      method: "POST", body: JSON.stringify({ sql, max_rows: maxRows }),
+    }),
+  // Statistics
+  getStats: (instanceId: string) =>
+    apiFetch<any>(`/api/v1/database/${instanceId}/stats`),
+  getIndexes: (instanceId: string, table: string) =>
+    apiFetch<any[]>(`/api/v1/database/${instanceId}/tables/${table}/indexes`),
+  // Export
+  exportTable: (instanceId: string, table: string) =>
+    `/api/v1/database/${instanceId}/tables/${table}/export`,
+  // Quick Actions
+  resetPassword: (instanceId: string, newPassword: string) =>
+    apiFetch<any>(`/api/v1/database/${instanceId}/actions/reset-password`, {
+      method: "POST", body: JSON.stringify({ new_password: newPassword }),
+    }),
+  cleanupSessions: (instanceId: string) =>
+    apiFetch<any>(`/api/v1/database/${instanceId}/actions/cleanup-sessions`, { method: "POST" }),
+  cleanupAttachments: (instanceId: string) =>
+    apiFetch<any>(`/api/v1/database/${instanceId}/actions/cleanup-attachments`, { method: "POST" }),
+  getActiveUsers: (instanceId: string) =>
+    apiFetch<any>(`/api/v1/database/${instanceId}/actions/users`),
+  getInstalledModules: (instanceId: string) =>
+    apiFetch<any>(`/api/v1/database/${instanceId}/actions/modules`),
+  toggleUser: (instanceId: string, userId: number, active: boolean) =>
+    apiFetch<any>(`/api/v1/database/${instanceId}/actions/toggle-user`, {
+      method: "POST", body: JSON.stringify({ user_id: userId, active }),
+    }),
 };

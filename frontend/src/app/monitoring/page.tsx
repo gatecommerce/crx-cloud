@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useTranslations, useLocale } from "next-intl";
 import { AuthGuard } from "@/components/AuthGuard";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { StatsBar } from "@/components/dashboard/StatsBar";
@@ -36,6 +37,10 @@ interface ServerMetrics {
 }
 
 export default function MonitoringPage() {
+  const t = useTranslations("monitoring");
+  const tc = useTranslations("common");
+  const locale = useLocale();
+
   const [instances, setInstances] = useState<InstanceHealth[]>([]);
   const [servers, setServers] = useState<ServerMetrics[]>([]);
   const [loading, setLoading] = useState(true);
@@ -126,9 +131,9 @@ export default function MonitoringPage() {
             <div className="max-w-7xl mx-auto">
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h1 className="text-2xl font-bold">Monitoring</h1>
+                  <h1 className="text-2xl font-bold">{t("title")}</h1>
                   <p className="text-xs text-[var(--muted)] mt-1">
-                    Last refresh: {lastRefresh.toLocaleTimeString("it-IT")}
+                    {t("lastRefresh")}: {lastRefresh.toLocaleTimeString(locale)}
                   </p>
                 </div>
                 <button
@@ -142,16 +147,16 @@ export default function MonitoringPage() {
 
               {/* Summary cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                <SummaryCard icon={CheckCircle} label="Healthy" value={healthyCount} color="text-[var(--success)]" />
-                <SummaryCard icon={AlertTriangle} label="Unhealthy" value={unhealthyCount} color="text-[var(--warning)]" />
-                <SummaryCard icon={XCircle} label="Errors" value={errorCount} color="text-[var(--danger)]" />
-                <SummaryCard icon={Activity} label="Total" value={instances.length} color="text-[var(--accent)]" />
+                <SummaryCard icon={CheckCircle} label={t("healthy")} value={healthyCount} color="text-[var(--success)]" />
+                <SummaryCard icon={AlertTriangle} label={t("unhealthy")} value={unhealthyCount} color="text-[var(--warning)]" />
+                <SummaryCard icon={XCircle} label={t("errors")} value={errorCount} color="text-[var(--danger)]" />
+                <SummaryCard icon={Activity} label={t("total")} value={instances.length} color="text-[var(--accent)]" />
               </div>
 
               {/* Server Resources */}
               {servers.length > 0 && (
                 <div className="mb-6">
-                  <h2 className="text-sm font-semibold mb-3">Server Resources</h2>
+                  <h2 className="text-sm font-semibold mb-3">{t("serverResources")}</h2>
                   <div className="grid gap-4 md:grid-cols-2">
                     {servers.map((srv) => (
                       <div key={srv.id} className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
@@ -163,9 +168,9 @@ export default function MonitoringPage() {
                           <span className="text-xs text-[var(--muted)]">{srv.endpoint}</span>
                         </div>
                         <div className="space-y-3">
-                          <ResourceBar label="CPU" value={srv.cpu_percent} icon={Cpu} />
-                          <ResourceBar label="RAM" value={srv.ram_percent} icon={MemoryStick} />
-                          <ResourceBar label="Disk" value={srv.disk_percent} icon={HardDrive} />
+                          <ResourceBar label={t("cpu")} value={srv.cpu_percent} icon={Cpu} />
+                          <ResourceBar label={t("ram")} value={srv.ram_percent} icon={MemoryStick} />
+                          <ResourceBar label={t("disk")} value={srv.disk_percent} icon={HardDrive} />
                         </div>
                       </div>
                     ))}
@@ -174,23 +179,23 @@ export default function MonitoringPage() {
               )}
 
               {/* Instance Health */}
-              <h2 className="text-sm font-semibold mb-3">Instance Health</h2>
+              <h2 className="text-sm font-semibold mb-3">{t("instanceHealth")}</h2>
               {instances.length === 0 ? (
                 <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-8 text-center">
                   <Activity size={32} className="mx-auto text-[var(--muted)] mb-3" />
-                  <p className="text-sm text-[var(--muted)]">No instances to monitor.</p>
+                  <p className="text-sm text-[var(--muted)]">{t("noInstances")}</p>
                 </div>
               ) : (
                 <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl overflow-hidden">
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-[var(--border)] text-xs text-[var(--muted)]">
-                        <th className="text-left px-4 py-3">Status</th>
+                        <th className="text-left px-4 py-3">{tc("status")}</th>
                         <th className="text-left px-4 py-3">Instance</th>
-                        <th className="text-left px-4 py-3">Type</th>
-                        <th className="text-left px-4 py-3">HTTP</th>
-                        <th className="text-left px-4 py-3">Container</th>
-                        <th className="text-left px-4 py-3">Response</th>
+                        <th className="text-left px-4 py-3">{tc("type")}</th>
+                        <th className="text-left px-4 py-3">{t("http")}</th>
+                        <th className="text-left px-4 py-3">{t("container")}</th>
+                        <th className="text-left px-4 py-3">{t("response")}</th>
                       </tr>
                     </thead>
                     <tbody>

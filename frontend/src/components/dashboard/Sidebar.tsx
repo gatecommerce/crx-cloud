@@ -3,26 +3,32 @@
 import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { authApi } from "@/lib/api";
+import { useLocaleSwitch, LOCALE_LABELS, SUPPORTED_LOCALES, type Locale } from "@/i18n/client";
 import {
   Server, Box, Database, Globe, Activity, Puzzle, Settings,
-  ChevronLeft, ChevronRight, LogOut, User
+  ChevronLeft, ChevronRight, LogOut, User, Languages, Search
 } from "lucide-react";
+import { CommandPalette } from "@/components/CommandPalette";
 
-const navItems = [
-  { icon: Server, label: "Servers", href: "/" },
-  { icon: Box, label: "Instances", href: "/instances" },
-  { icon: Database, label: "Backups", href: "/backups" },
-  { icon: Globe, label: "Domains", href: "/domains" },
-  { icon: Activity, label: "Monitoring", href: "/monitoring" },
-  { icon: Puzzle, label: "Plugins", href: "/plugins" },
-  { icon: Settings, label: "Settings", href: "/settings" },
+const navKeys = [
+  { icon: Server, key: "servers" as const, href: "/" },
+  { icon: Box, key: "instances" as const, href: "/instances" },
+  { icon: Database, key: "backups" as const, href: "/backups" },
+  { icon: Globe, key: "domains" as const, href: "/domains" },
+  { icon: Activity, key: "monitoring" as const, href: "/monitoring" },
+  { icon: Puzzle, key: "plugins" as const, href: "/plugins" },
+  { icon: Settings, key: "settings" as const, href: "/settings" },
 ];
 
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [userName, setUserName] = useState("");
+  const [showLangMenu, setShowLangMenu] = useState(false);
   const pathname = usePathname();
+  const t = useTranslations("nav");
+  const switchLocale = useLocaleSwitch();
 
   useEffect(() => {
     authApi.session().then((s) => setUserName(s.name || `ID: ${s.telegram_id}`)).catch(() => {});
@@ -33,6 +39,7 @@ export function Sidebar() {
   }
 
   return (
+    <>
     <aside
       className={`${collapsed ? "w-16" : "w-60"} bg-[var(--card)] border-r border-[var(--border)] flex flex-col transition-all duration-200`}
     >
@@ -41,17 +48,31 @@ export function Sidebar() {
         <div className="w-8 h-8 bg-[var(--accent)] rounded-lg flex items-center justify-center font-bold text-xs shrink-0">
           CRX
         </div>
-        {!collapsed && <span className="font-semibold text-sm">CRX Cloud</span>}
+        {!collapsed && <span className="font-semibold text-sm">{t("crxCloud")}</span>}
       </div>
+
+      {/* Search shortcut */}
+      {!collapsed && (
+        <div className="px-3 pt-3 pb-1">
+          <button
+            onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--background)] text-xs text-[var(--muted)] hover:border-[var(--accent)]/50 transition-colors"
+          >
+            <Search size={14} />
+            <span className="flex-1 text-left">Search...</span>
+            <kbd className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--card)] border border-[var(--border)]">Ctrl+K</kbd>
+          </button>
+        </div>
+      )}
 
       {/* Navigation */}
       <nav className="flex-1 p-2">
-        {navItems.map((item) => {
+        {navKeys.map((item) => {
           const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
           const Icon = item.icon;
           return (
             <Link
-              key={item.label}
+              key={item.key}
               href={item.href}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm mb-0.5 transition-colors ${
                 isActive
@@ -60,14 +81,46 @@ export function Sidebar() {
               }`}
             >
               <Icon size={18} className="shrink-0" />
-              {!collapsed && <span>{item.label}</span>}
+              {!collapsed && <span>{t(item.key)}</span>}
             </Link>
           );
         })}
       </nav>
 
-      {/* User + Collapse */}
+      {/* Language Switcher + User + Collapse */}
       <div className="border-t border-[var(--border)]">
+        {/* Language switcher */}
+        {!collapsed && (
+          <div className="relative px-4 py-2">
+            <button
+              onClick={() => setShowLangMenu(!showLangMenu)}
+              className="flex items-center gap-2 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors w-full"
+            >
+              <Languages size={14} className="shrink-0" />
+              <span className="truncate">
+                {LOCALE_LABELS[document.cookie.match(/locale=([^;]+)/)?.[1] as Locale || "it"]}
+              </span>
+            </button>
+            {showLangMenu && (
+              <div className="absolute bottom-full left-2 mb-1 bg-[var(--card)] border border-[var(--border)] rounded-lg shadow-xl py-1 min-w-[160px] z-50">
+                {SUPPORTED_LOCALES.map((loc) => (
+                  <button
+                    key={loc}
+                    onClick={() => {
+                      switchLocale(loc);
+                      setShowLangMenu(false);
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--card-hover)] transition-colors flex items-center justify-between"
+                  >
+                    <span>{LOCALE_LABELS[loc]}</span>
+                    <span className="text-[var(--muted)] text-[10px] font-mono">{loc.toUpperCase()}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {userName && !collapsed && (
           <div className="px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2 min-w-0">
@@ -87,5 +140,7 @@ export function Sidebar() {
         </button>
       </div>
     </aside>
+    <CommandPalette />
+    </>
   );
 }

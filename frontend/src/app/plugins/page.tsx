@@ -5,12 +5,13 @@ import { Sidebar } from "@/components/dashboard/Sidebar";
 import { StatsBar } from "@/components/dashboard/StatsBar";
 import { VitoChat } from "@/components/dashboard/VitoChat";
 import { Puzzle, Check } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 const plugins = [
   {
     id: "odoo",
     name: "Odoo",
-    description: "Complete ERP & CMS platform. Community and Enterprise editions.",
+    descriptionKey: "odoo.description",
     versions: ["19.0", "18.0", "17.0", "16.0"],
     available: true,
     color: "bg-purple-500/10 text-purple-400 border-purple-500/20",
@@ -18,7 +19,7 @@ const plugins = [
   {
     id: "wordpress",
     name: "WordPress",
-    description: "The world's most popular CMS. Blogs, sites, e-commerce.",
+    descriptionKey: "wordpress.description",
     versions: ["6.8", "6.7", "6.6"],
     available: false,
     color: "bg-blue-500/10 text-blue-400 border-blue-500/20",
@@ -26,7 +27,7 @@ const plugins = [
   {
     id: "prestashop",
     name: "PrestaShop",
-    description: "Open-source e-commerce platform. EU-focused, multi-language.",
+    descriptionKey: "prestashop.description",
     versions: ["9.0", "8.2", "8.1"],
     available: false,
     color: "bg-pink-500/10 text-pink-400 border-pink-500/20",
@@ -34,7 +35,7 @@ const plugins = [
   {
     id: "woocommerce",
     name: "WooCommerce",
-    description: "WordPress e-commerce plugin. Flexible and extensible.",
+    descriptionKey: "woocommerce.description",
     versions: ["6.8", "6.7"],
     available: false,
     color: "bg-violet-500/10 text-violet-400 border-violet-500/20",
@@ -42,6 +43,8 @@ const plugins = [
 ];
 
 export default function PluginsPage() {
+  const t = useTranslations("plugins");
+
   return (
     <AuthGuard>
       <div className="flex h-screen">
@@ -50,7 +53,7 @@ export default function PluginsPage() {
           <StatsBar />
           <main className="flex-1 overflow-y-auto p-6">
             <div className="max-w-7xl mx-auto">
-              <h1 className="text-2xl font-bold mb-6">Plugins</h1>
+              <h1 className="text-2xl font-bold mb-6">{t("title")}</h1>
               <div className="grid gap-4 md:grid-cols-2">
                 {plugins.map((plugin) => (
                   <div
@@ -73,13 +76,13 @@ export default function PluginsPage() {
                       </div>
                       {plugin.available ? (
                         <span className="flex items-center gap-1 text-xs text-[var(--success)]">
-                          <Check size={14} /> Active
+                          <Check size={14} /> {t("active")}
                         </span>
                       ) : (
-                        <span className="text-xs text-[var(--muted)]">Coming soon</span>
+                        <span className="text-xs text-[var(--muted)]">{t("comingSoon")}</span>
                       )}
                     </div>
-                    <p className="text-sm text-[var(--muted)]">{plugin.description}</p>
+                    <p className="text-sm text-[var(--muted)]">{t(plugin.descriptionKey)}</p>
                   </div>
                 ))}
               </div>

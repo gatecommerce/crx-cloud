@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { AuthGuard } from "@/components/AuthGuard";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { StatsBar } from "@/components/dashboard/StatsBar";
@@ -23,13 +24,7 @@ const statusColors: Record<string, string> = {
   updating: "bg-amber-500",
 };
 
-const statusLabels: Record<string, string> = {
-  running: "Started",
-  stopped: "Stopped",
-  deploying: "Deploying",
-  error: "Error",
-  updating: "Updating",
-};
+// statusLabels removed — now using t("status.running") etc. via useTranslations
 
 const cmsLogos: Record<string, { label: string; color: string; bg: string }> = {
   odoo: { label: "Odoo", color: "text-purple-400", bg: "bg-purple-500/10" },
@@ -136,6 +131,8 @@ const COUNTRIES = [
 // ─── Main Page ──────────────────────────────────────────────────────
 
 export default function InstancesPage() {
+  const t = useTranslations("instances");
+  const tCommon = useTranslations("common");
   const router = useRouter();
   const [instances, setInstances] = useState<Instance[]>([]);
   const [servers, setServers] = useState<any[]>([]);
@@ -189,7 +186,7 @@ export default function InstancesPage() {
 
   async function handleDelete(e: React.MouseEvent, id: string, name: string) {
     e.stopPropagation();
-    if (!confirm(`Delete instance "${name}"? This cannot be undone.`)) return;
+    if (!confirm(t("confirmDelete", { name }))) return;
     setActionLoading(`${id}-delete`);
     try {
       await instancesApi.remove(id);
@@ -215,7 +212,7 @@ export default function InstancesPage() {
             <div className="max-w-7xl mx-auto">
               {/* Header */}
               <div className="flex items-center justify-between mb-6">
-                <h1 className="text-2xl font-bold">Instances</h1>
+                <h1 className="text-2xl font-bold">{t("title")}</h1>
                 <div className="flex items-center gap-2">
                   {/* Search */}
                   <div className="relative">
@@ -223,7 +220,7 @@ export default function InstancesPage() {
                     <input
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search instances..."
+                      placeholder={t("searchInstances")}
                       className="pl-8 pr-3 py-2 bg-[var(--card)] border border-[var(--border)] rounded-lg text-sm w-48 focus:outline-none focus:border-[var(--accent)] focus:w-64 transition-all"
                     />
                   </div>
@@ -249,7 +246,7 @@ export default function InstancesPage() {
                     onClick={() => setShowDeploy(true)}
                     className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
                   >
-                    <Plus size={16} /> Deploy Instance
+                    <Plus size={16} /> {t("deployInstance")}
                   </button>
                 </div>
               </div>
@@ -261,13 +258,13 @@ export default function InstancesPage() {
               ) : instances.length === 0 ? (
                 <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-12 text-center">
                   <Box size={48} className="mx-auto text-[var(--muted)] mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">No instances yet</h3>
-                  <p className="text-sm text-[var(--muted)] mb-4">Deploy your first CMS instance on one of your servers.</p>
+                  <h3 className="text-lg font-semibold mb-2">{t("emptyTitle")}</h3>
+                  <p className="text-sm text-[var(--muted)] mb-4">{t("emptyDescription")}</p>
                   <button
                     onClick={() => setShowDeploy(true)}
                     className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-sm font-medium"
                   >
-                    Deploy Instance
+                    {t("deployInstance")}
                   </button>
                 </div>
               ) : viewMode === "list" ? (
@@ -276,11 +273,11 @@ export default function InstancesPage() {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-[var(--border)]">
-                        <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">Primary domain</th>
-                        <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">Server</th>
-                        <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">Status</th>
-                        <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">Edition</th>
-                        <th className="text-right text-xs font-normal text-[var(--muted)] px-5 py-3">Actions</th>
+                        <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">{t("primaryDomain")}</th>
+                        <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">{t("server")}</th>
+                        <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">{tCommon("status")}</th>
+                        <th className="text-left text-xs font-normal text-[var(--muted)] px-5 py-3">{t("editionLabel")}</th>
+                        <th className="text-right text-xs font-normal text-[var(--muted)] px-5 py-3">{tCommon("actions")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -318,7 +315,7 @@ export default function InstancesPage() {
                                 {srv?.provider && (
                                   <span className="text-xs font-medium capitalize">{srv.provider}</span>
                                 )}
-                                <span className="truncate max-w-[300px]">{srv?.name || "Unknown"}</span>
+                                <span className="truncate max-w-[300px]">{srv?.name || tCommon("unknown")}</span>
                                 <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-600 text-white">
                                   {inst.version}
                                 </span>
@@ -328,14 +325,14 @@ export default function InstancesPage() {
                             <td className="px-5 py-4">
                               <div className="flex items-center gap-2">
                                 <div className={`w-2.5 h-2.5 rounded-full ${statusColors[inst.status]}`} />
-                                <span className="text-sm">{statusLabels[inst.status] || inst.status}</span>
+                                <span className="text-sm">{t(`status.${inst.status}` as any) || inst.status}</span>
                                 {inst.status === "deploying" && <Loader2 size={12} className="animate-spin text-amber-500" />}
                               </div>
                             </td>
                             {/* Edition */}
                             <td className="px-5 py-4">
                               <span className={`text-[10px] font-semibold px-2 py-1 rounded ${editionColors[edition] || editionColors.community}`}>
-                                {edition === "enterprise" ? "Enterprise" : "Community"}
+                                {t(`edition.${edition}` as any)}
                               </span>
                             </td>
                             {/* Actions */}
@@ -347,7 +344,7 @@ export default function InstancesPage() {
                                       onClick={() => handleAction(inst.id, "restart")}
                                       disabled={!!actionLoading}
                                       className="p-1.5 rounded hover:bg-[var(--border)] transition-colors disabled:opacity-50"
-                                      title="Restart"
+                                      title={t("restart")}
                                     >
                                       {actionLoading === `${inst.id}-restart` ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
                                     </button>
@@ -355,7 +352,7 @@ export default function InstancesPage() {
                                       onClick={() => handleAction(inst.id, "stop")}
                                       disabled={!!actionLoading}
                                       className="p-1.5 rounded hover:bg-[var(--border)] transition-colors text-amber-500 disabled:opacity-50"
-                                      title="Stop"
+                                      title={t("stop")}
                                     >
                                       {actionLoading === `${inst.id}-stop` ? <Loader2 size={14} className="animate-spin" /> : <Square size={14} />}
                                     </button>
@@ -365,7 +362,7 @@ export default function InstancesPage() {
                                     onClick={() => handleAction(inst.id, "start")}
                                     disabled={!!actionLoading}
                                     className="p-1.5 rounded hover:bg-emerald-500/10 text-emerald-500 transition-colors disabled:opacity-50"
-                                    title="Start"
+                                    title={t("start")}
                                   >
                                     {actionLoading === `${inst.id}-start` ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
                                   </button>
@@ -374,7 +371,7 @@ export default function InstancesPage() {
                                   onClick={(e) => handleDelete(e, inst.id, inst.name)}
                                   disabled={!!actionLoading}
                                   className="p-1.5 rounded hover:bg-red-500/10 text-red-500 transition-colors disabled:opacity-50"
-                                  title="Delete"
+                                  title={tCommon("delete")}
                                 >
                                   {actionLoading === `${inst.id}-delete` ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                                 </button>
@@ -387,7 +384,7 @@ export default function InstancesPage() {
                   </table>
                   {/* Footer counter */}
                   <div className="text-right text-xs text-[var(--muted)] px-5 py-3 border-t border-[var(--border)]">
-                    Showing <span className="font-semibold text-[var(--accent)]">{filteredInstances.length}</span> Instance{filteredInstances.length !== 1 ? "s" : ""} of <span className="font-semibold text-[var(--accent)]">{instances.length}</span> Instance{instances.length !== 1 ? "s" : ""}.
+                    {t("showing")} <span className="font-semibold text-[var(--accent)]">{filteredInstances.length}</span> {t("of")} <span className="font-semibold text-[var(--accent)]">{instances.length}</span>.
                   </div>
                 </div>
               ) : (
@@ -417,7 +414,7 @@ export default function InstancesPage() {
                                 {inst.version}
                               </span>
                               <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${editionColors[edition]}`}>
-                                {edition === "enterprise" ? "Ent" : "CE"}
+                                {edition === "enterprise" ? t("edition.enterprise") : t("edition.community")}
                               </span>
                             </div>
                           </div>
@@ -426,7 +423,7 @@ export default function InstancesPage() {
                           <div className="space-y-2 mb-4">
                             <div className="text-xs text-[var(--muted)] flex items-center gap-2">
                               <Server size={12} />
-                              <span className="truncate">{srv?.name || "Unknown"}</span>
+                              <span className="truncate">{srv?.name || tCommon("unknown")}</span>
                               {srv?.provider && (
                                 <span className="text-[10px] capitalize font-medium">{srv.provider}</span>
                               )}
@@ -443,19 +440,19 @@ export default function InstancesPage() {
                             {inst.status === "running" ? (
                               <>
                                 <button onClick={() => handleAction(inst.id, "restart")} disabled={!!actionLoading} className="flex-1 flex items-center justify-center gap-1 text-xs py-1.5 rounded-md bg-[var(--background)] hover:bg-[var(--border)] transition-colors disabled:opacity-50">
-                                  {actionLoading === `${inst.id}-restart` ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />} Restart
+                                  {actionLoading === `${inst.id}-restart` ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />} {t("restart")}
                                 </button>
                                 <button onClick={() => handleAction(inst.id, "stop")} disabled={!!actionLoading} className="flex-1 flex items-center justify-center gap-1 text-xs py-1.5 rounded-md bg-[var(--background)] hover:bg-[var(--border)] transition-colors text-amber-500 disabled:opacity-50">
-                                  {actionLoading === `${inst.id}-stop` ? <Loader2 size={12} className="animate-spin" /> : <Square size={12} />} Stop
+                                  {actionLoading === `${inst.id}-stop` ? <Loader2 size={12} className="animate-spin" /> : <Square size={12} />} {t("stop")}
                                 </button>
                               </>
                             ) : inst.status === "stopped" ? (
                               <button onClick={() => handleAction(inst.id, "start")} disabled={!!actionLoading} className="flex-1 flex items-center justify-center gap-1 text-xs py-1.5 rounded-md bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors disabled:opacity-50">
-                                {actionLoading === `${inst.id}-start` ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Start
+                                {actionLoading === `${inst.id}-start` ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} {t("start")}
                               </button>
                             ) : (
                               <div className="flex-1 text-center text-xs py-1.5 text-[var(--muted)]">
-                                {inst.status === "deploying" ? "Deploying..." : inst.status}
+                                {inst.status === "deploying" ? t("deploying") : inst.status}
                               </div>
                             )}
                             <button onClick={(e) => handleDelete(e, inst.id, inst.name)} disabled={!!actionLoading} className="flex items-center justify-center gap-1 text-xs py-1.5 px-3 rounded-md text-red-500 hover:bg-red-500/10 transition-colors disabled:opacity-50">
@@ -467,7 +464,7 @@ export default function InstancesPage() {
                     })}
                   </div>
                   <div className="text-right text-xs text-[var(--muted)] mt-4">
-                    Showing <span className="font-semibold text-[var(--accent)]">{filteredInstances.length}</span> Instance{filteredInstances.length !== 1 ? "s" : ""} of <span className="font-semibold text-[var(--accent)]">{instances.length}</span>.
+                    {t("showing")} <span className="font-semibold text-[var(--accent)]">{filteredInstances.length}</span> {t("of")} <span className="font-semibold text-[var(--accent)]">{instances.length}</span>.
                   </div>
                 </>
               )}
@@ -518,6 +515,8 @@ function DeployModal({
   onClose: () => void;
   onDeployed: () => void;
 }) {
+  const t = useTranslations("instances");
+  const tCommon = useTranslations("common");
   const [step, setStep] = useState(1); // 1=basic, 2=review
   const [form, setForm] = useState({
     name: "",
@@ -526,7 +525,6 @@ function DeployModal({
     server_id: servers[0]?.id || "",
     domain: "",
     auto_domain: true,
-    workers: 2,
     ram_mb: 2048,
     cpu_cores: 1,
     admin_password: generatePassword(),
@@ -594,7 +592,6 @@ function DeployModal({
         version: form.version,
         server_id: form.server_id,
         domain: fullDomain || "",
-        workers: form.workers,
         ram_mb: form.ram_mb,
         cpu_cores: form.cpu_cores,
         admin_password: form.admin_password,
@@ -634,7 +631,7 @@ function DeployModal({
       >
         {/* Header */}
         <div className="sticky top-0 bg-[var(--card)] border-b border-[var(--border)] px-6 py-4 flex items-center justify-between z-10 rounded-t-xl">
-          <h2 className="text-lg font-semibold">Deploy New Instance</h2>
+          <h2 className="text-lg font-semibold">{t("deployNewInstance")}</h2>
           <button onClick={onClose} className="text-[var(--muted)] hover:text-[var(--foreground)] text-xl leading-none">&times;</button>
         </div>
 
@@ -645,11 +642,11 @@ function DeployModal({
 
           {/* Server selection */}
           <div>
-            <label className={labelClass}>Server</label>
+            <label className={labelClass}>{t("server")}</label>
             <div className="space-y-2">
               {servers.length === 0 ? (
                 <div className="text-sm text-[var(--muted)] bg-[var(--background)] rounded-lg px-4 py-3">
-                  No online servers available. Add a server first.
+                  {t("noServersAvailable")}
                 </div>
               ) : (
                 servers.map((s) => (
@@ -672,7 +669,7 @@ function DeployModal({
                           const opts = [512, 1024, 2048, 4096, 8192, 16384, 32768].filter(v => v <= specs.ram_mb);
                           newForm.ram_mb = opts.length > 0 ? opts[opts.length - 1] : 512;
                         }
-                        if (newForm.workers > specs.cpu_cores * 2) newForm.workers = Math.max(1, specs.cpu_cores);
+
                       }
                       setForm(newForm);
                     }}
@@ -694,20 +691,20 @@ function DeployModal({
           {/* CMS + Version + Name */}
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <label className={labelClass}>CMS</label>
+              <label className={labelClass}>{tCommon("type")}</label>
               <select
                 value={form.cms_type}
                 onChange={(e) => setForm({ ...form, cms_type: e.target.value, version: versions[e.target.value]?.[0] || "" })}
                 className={inputClass}
               >
-                <option value="odoo">Odoo</option>
-                <option value="wordpress">WordPress</option>
-                <option value="prestashop">PrestaShop</option>
-                <option value="woocommerce">WooCommerce</option>
+                <option value="odoo">{t("cms.odoo")}</option>
+                <option value="wordpress">{t("cms.wordpress")}</option>
+                <option value="prestashop">{t("cms.prestashop")}</option>
+                <option value="woocommerce">{t("cms.woocommerce")}</option>
               </select>
             </div>
             <div>
-              <label className={labelClass}>Version</label>
+              <label className={labelClass}>{tCommon("version")}</label>
               <select
                 value={form.version}
                 onChange={(e) => setForm({ ...form, version: e.target.value })}
@@ -719,7 +716,7 @@ function DeployModal({
               </select>
             </div>
             <div>
-              <label className={labelClass}>Instance Name</label>
+              <label className={labelClass}>{t("instanceName")}</label>
               <input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -732,7 +729,7 @@ function DeployModal({
 
           {/* Domain */}
           <div>
-            <label className={labelClass}>Domain name</label>
+            <label className={labelClass}>{t("domainName")}</label>
             <div className="flex items-center gap-3">
               {form.auto_domain ? (
                 <div className="flex-1 flex items-center gap-0 bg-[var(--background)] border border-[var(--border)] rounded-lg overflow-hidden">
@@ -763,17 +760,17 @@ function DeployModal({
                   onChange={(e) => setForm({ ...form, auto_domain: e.target.checked })}
                   className="accent-[var(--accent)]"
                 />
-                Auto-generate on site.crx.team
+                {t("autoGenerateDomain")}
               </label>
               {!form.auto_domain && (
-                <span className="text-[10px] text-[var(--muted)]">Tip: Domain name can still be changed later.</span>
+                <span className="text-[10px] text-[var(--muted)]">{t("domainChangeLater")}</span>
               )}
             </div>
           </div>
 
           {/* Admin Password — security-first UX */}
           <div>
-            <label className={labelClass}>Password for admin user</label>
+            <label className={labelClass}>{t("adminPassword")}</label>
             <div className="flex items-center gap-2">
               <div className="flex-1 relative">
                 <input
@@ -794,7 +791,7 @@ function DeployModal({
                 type="button"
                 onClick={handleRegeneratePassword}
                 className="p-2 rounded-lg border border-[var(--border)] hover:bg-[var(--border)] transition-colors"
-                title="Generate new password"
+                title={t("generateNewPassword")}
               >
                 <Dices size={16} className="text-[var(--muted)]" />
               </button>
@@ -802,13 +799,13 @@ function DeployModal({
                 type="button"
                 onClick={handleCopyPassword}
                 className="p-2 rounded-lg border border-[var(--border)] hover:bg-[var(--border)] transition-colors"
-                title="Copy password"
+                title={t("copyPassword")}
               >
                 {passwordCopied ? <Check size={16} className="text-emerald-500" /> : <Copy size={16} className="text-[var(--muted)]" />}
               </button>
             </div>
             <p className="text-xs text-red-400 mt-1.5 font-medium">
-              This password is only shown once. Please store it securely.
+              {t("passwordWarning")}
             </p>
           </div>
 
@@ -819,7 +816,7 @@ function DeployModal({
             className="flex items-center gap-2 text-sm text-[var(--accent)] hover:underline"
           >
             {showAdvanced ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            {showAdvanced ? "Hide" : "Show"} advanced options
+            {showAdvanced ? t("hideAdvanced") : t("showAdvanced")}
           </button>
 
           {/* Advanced options */}
@@ -827,7 +824,7 @@ function DeployModal({
             <div className="space-y-4 pl-4 border-l-2 border-[var(--accent)]/20">
               {/* Database name */}
               <div>
-                <label className={labelClass}>Database name</label>
+                <label className={labelClass}>{t("databaseName")}</label>
                 <input
                   value={form.db_name || subdomain.replace(/-/g, "_")}
                   onChange={(e) => setForm({ ...form, db_name: e.target.value })}
@@ -835,7 +832,7 @@ function DeployModal({
                   className={inputClass}
                 />
                 <p className="text-[10px] text-[var(--muted)] mt-1">
-                  {isOdoo ? "Odoo database name" : "Database name"}
+                  {isOdoo ? t("odooDatabaseName") : t("databaseName")}
                 </p>
               </div>
 
@@ -848,10 +845,10 @@ function DeployModal({
                   >
                     <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform mx-0.5 ${form.demo_data ? "translate-x-5" : ""}`} />
                   </div>
-                  <span className="text-sm font-medium">Install Demo Data</span>
+                  <span className="text-sm font-medium">{t("installDemoData")}</span>
                 </label>
                 <p className="text-[10px] text-amber-500 mt-1">
-                  Populates the database with sample products, customers, and orders. This is irreversible — demo data cannot be removed once installed.
+                  {t("demoDataWarning")}
                 </p>
               </div>
 
@@ -864,10 +861,10 @@ function DeployModal({
                   >
                     <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform mx-0.5 ${form.use_external_db ? "translate-x-5" : ""}`} />
                   </div>
-                  <span className="text-sm font-medium">Use External Database</span>
+                  <span className="text-sm font-medium">{t("useExternalDb")}</span>
                 </label>
                 <p className="text-[10px] text-[var(--muted)] mt-1">
-                  Connect to an external PostgreSQL database instead of creating one on this server
+                  {t("externalDbDescription")}
                 </p>
               </div>
 
@@ -875,18 +872,18 @@ function DeployModal({
               {form.use_external_db && (
                 <div className="space-y-3 bg-[var(--background)] rounded-lg p-4 border border-[var(--border)]">
                   <div>
-                    <label className={labelClass}>Database Host</label>
+                    <label className={labelClass}>{t("dbHost")}</label>
                     <input
                       value={form.external_db_host}
                       onChange={(e) => setForm({ ...form, external_db_host: e.target.value })}
-                      placeholder="e.g., 127.0.0.1"
+                      placeholder={t("dbHostPlaceholder")}
                       className={inputClass}
                     />
-                    <p className="text-[10px] text-[var(--muted)] mt-1">The hostname or IP address of your PostgreSQL server</p>
+                    <p className="text-[10px] text-[var(--muted)] mt-1">{t("dbHostDescription")}</p>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className={labelClass}>Database Port</label>
+                      <label className={labelClass}>{t("dbPort")}</label>
                       <input
                         type="number"
                         value={form.external_db_port}
@@ -895,41 +892,41 @@ function DeployModal({
                       />
                     </div>
                     <div>
-                      <label className={labelClass}>Database name</label>
+                      <label className={labelClass}>{t("databaseName")}</label>
                       <input
                         value={form.external_db_name || form.db_name || subdomain.replace(/-/g, "_")}
                         onChange={(e) => setForm({ ...form, external_db_name: e.target.value })}
-                        placeholder="Odoo database name"
+                        placeholder={t("odooDatabaseName")}
                         className={inputClass}
                       />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className={labelClass}>Database User</label>
+                      <label className={labelClass}>{t("dbUser")}</label>
                       <input
                         value={form.external_db_user}
                         onChange={(e) => setForm({ ...form, external_db_user: e.target.value })}
-                        placeholder="PostgreSQL username"
+                        placeholder={t("dbUserPlaceholder")}
                         className={inputClass}
                       />
                     </div>
                     <div>
-                      <label className={labelClass}>Database Password</label>
+                      <label className={labelClass}>{t("dbPassword")}</label>
                       <input
                         type="password"
                         value={form.external_db_password}
                         onChange={(e) => setForm({ ...form, external_db_password: e.target.value })}
-                        placeholder="PostgreSQL password"
+                        placeholder={t("dbPasswordPlaceholder")}
                         className={inputClass}
                       />
                     </div>
                   </div>
                   <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-300">
-                    <p className="font-semibold mb-1"><Info size={12} className="inline mr-1" />Tip</p>
+                    <p className="font-semibold mb-1"><Info size={12} className="inline mr-1" />{t("externalDbTip")}</p>
                     <ol className="list-decimal list-inside space-y-1">
-                      <li>Please ensure your external database exists, is reachable, and is completely empty before proceeding.</li>
-                      <li>When you delete an instance, the linked <strong>external database</strong> will not be removed automatically.</li>
+                      <li>{t("externalDbTip1")}</li>
+                      <li>{t("externalDbTip2")}</li>
                     </ol>
                   </div>
                 </div>
@@ -939,7 +936,7 @@ function DeployModal({
               {isOdoo && (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className={labelClass}>Language</label>
+                    <label className={labelClass}>{t("language")}</label>
                     <select
                       value={form.language}
                       onChange={(e) => setForm({ ...form, language: e.target.value })}
@@ -951,14 +948,14 @@ function DeployModal({
                     </select>
                   </div>
                   <div>
-                    <label className={labelClass}>Country</label>
+                    <label className={labelClass}>{t("country")}</label>
                     <select
                       value={form.country}
                       onChange={(e) => setForm({ ...form, country: e.target.value })}
                       className={inputClass}
                     >
                       {COUNTRIES.map((c) => (
-                        <option key={c.code} value={c.code}>{c.label}</option>
+                        <option key={c.code} value={c.code}>{c.code === "" ? t("selectCountry") : c.label}</option>
                       ))}
                     </select>
                   </div>
@@ -967,24 +964,13 @@ function DeployModal({
 
               {/* Resources — limited by server specs */}
               {serverSpecs && (
-                <p className="text-[10px] text-[var(--muted)] -mb-2">
-                  Server: {serverSpecs.cpu_cores} vCPU, {serverSpecs.ram_mb >= 1024 ? `${(serverSpecs.ram_mb / 1024).toFixed(0)} GB` : `${serverSpecs.ram_mb} MB`} RAM, {serverSpecs.disk_gb} GB disk
+                <p className="text-[10px] text-[var(--muted)] mb-1">
+                  {t("server")}: {serverSpecs.cpu_cores} vCPU, {serverSpecs.ram_mb >= 1024 ? `${(serverSpecs.ram_mb / 1024).toFixed(0)} GB` : `${serverSpecs.ram_mb} MB`} RAM, {serverSpecs.disk_gb} GB disk
                 </p>
               )}
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className={labelClass}>Workers</label>
-                  <input
-                    type="number"
-                    value={form.workers}
-                    onChange={(e) => setForm({ ...form, workers: Math.min(parseInt(e.target.value) || 1, maxCpuCores * 2) })}
-                    min={1}
-                    max={maxCpuCores * 2}
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>RAM</label>
+                  <label className={labelClass}>{t("ram")}</label>
                   <select
                     value={form.ram_mb}
                     onChange={(e) => setForm({ ...form, ram_mb: parseInt(e.target.value) })}
@@ -1000,7 +986,7 @@ function DeployModal({
                   </select>
                 </div>
                 <div>
-                  <label className={labelClass}>CPU Cores</label>
+                  <label className={labelClass}>{t("cpuCores")}</label>
                   <select
                     value={form.cpu_cores}
                     onChange={(e) => setForm({ ...form, cpu_cores: parseInt(e.target.value) })}
@@ -1010,7 +996,7 @@ function DeployModal({
                       .filter((v) => v <= maxCpuCores)
                       .map((v) => (
                         <option key={v} value={v}>
-                          {v} core{v > 1 ? "s" : ""}
+                          {v} {v > 1 ? t("cores") : t("core")}
                         </option>
                       ))}
                   </select>
@@ -1027,7 +1013,7 @@ function DeployModal({
               onChange={(e) => setPasswordSaved(e.target.checked)}
               className="w-4 h-4 accent-[var(--accent)]"
             />
-            <span className="text-sm">I have saved the admin password</span>
+            <span className="text-sm">{t("passwordSavedConfirm")}</span>
           </label>
 
           {/* Actions */}
@@ -1037,7 +1023,7 @@ function DeployModal({
               onClick={onClose}
               className="px-4 py-2.5 text-sm text-[var(--muted)] hover:text-[var(--foreground)] font-medium"
             >
-              Cancel
+              {tCommon("cancel")}
             </button>
             <button
               type="submit"
@@ -1045,9 +1031,9 @@ function DeployModal({
               className="px-6 py-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-sm font-semibold transition-colors"
             >
               {loading ? (
-                <span className="flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Deploying...</span>
+                <span className="flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> {t("deploying")}</span>
               ) : (
-                "Create Instance"
+                t("createInstance")
               )}
             </button>
           </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { serversApi, instancesApi, backupsApi } from "@/lib/api";
 import { Server, Box, Database, AlertTriangle } from "lucide-react";
 
@@ -13,6 +14,7 @@ interface Stats {
 
 export function StatsBar() {
   const [stats, setStats] = useState<Stats>({ servers: 0, instances: 0, backups: 0, alerts: 0 });
+  const t = useTranslations("stats");
 
   useEffect(() => {
     async function load() {
@@ -42,10 +44,10 @@ export function StatsBar() {
   }, []);
 
   const items = [
-    { icon: Server, label: "Servers", value: stats.servers, ok: true },
-    { icon: Box, label: "Instances", value: stats.instances, ok: true },
-    { icon: Database, label: "Backups", value: stats.backups, ok: true },
-    { icon: AlertTriangle, label: "Alerts", value: stats.alerts, ok: stats.alerts === 0 },
+    { icon: Server, key: "servers" as const, value: stats.servers, ok: true },
+    { icon: Box, key: "instances" as const, value: stats.instances, ok: true },
+    { icon: Database, key: "backups" as const, value: stats.backups, ok: true },
+    { icon: AlertTriangle, key: "alerts" as const, value: stats.alerts, ok: stats.alerts === 0 },
   ];
 
   return (
@@ -54,9 +56,9 @@ export function StatsBar() {
         {items.map((item) => {
           const Icon = item.icon;
           return (
-            <div key={item.label} className="flex items-center gap-2">
+            <div key={item.key} className="flex items-center gap-2">
               <Icon size={14} className={item.ok ? "text-[var(--success)]" : "text-[var(--warning)]"} />
-              <span className="text-sm text-[var(--muted)]">{item.label}</span>
+              <span className="text-sm text-[var(--muted)]">{t(item.key)}</span>
               <span className="text-sm font-semibold">{item.value}</span>
             </div>
           );

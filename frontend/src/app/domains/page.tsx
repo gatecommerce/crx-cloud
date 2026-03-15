@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { AuthGuard } from "@/components/AuthGuard";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { StatsBar } from "@/components/dashboard/StatsBar";
@@ -22,6 +23,8 @@ interface DomainEntry {
 
 export default function DomainsPage() {
   const router = useRouter();
+  const t = useTranslations("domains");
+  const tc = useTranslations("common");
   const [domains, setDomains] = useState<DomainEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -57,7 +60,7 @@ export default function DomainsPage() {
           <main className="flex-1 overflow-y-auto p-6">
             <div className="max-w-7xl mx-auto">
               <div className="flex items-center justify-between mb-6">
-                <h1 className="text-2xl font-bold">Domains</h1>
+                <h1 className="text-2xl font-bold">{t("title")}</h1>
                 <button onClick={loadData} className="p-2 text-[var(--muted)] hover:text-[var(--foreground)] rounded-lg hover:bg-[var(--card-hover)]">
                   <RefreshCw size={16} />
                 </button>
@@ -70,15 +73,15 @@ export default function DomainsPage() {
               ) : domains.length === 0 ? (
                 <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-12 text-center">
                   <Globe size={48} className="mx-auto text-[var(--muted)] mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">No domains configured</h3>
+                  <h3 className="text-lg font-semibold mb-2">{t("emptyTitle")}</h3>
                   <p className="text-sm text-[var(--muted)] mb-4">
-                    Add a domain when deploying or editing an instance. SSL certificates are provisioned automatically via Let&apos;s Encrypt.
+                    {t("emptyDescription")}
                   </p>
                   <button
                     onClick={() => router.push("/instances")}
                     className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-sm font-medium"
                   >
-                    Go to Instances
+                    {t("goToInstances")}
                   </button>
                 </div>
               ) : (
@@ -86,12 +89,12 @@ export default function DomainsPage() {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-[var(--border)] text-xs text-[var(--muted)]">
-                        <th className="text-left px-4 py-3">Domain</th>
-                        <th className="text-left px-4 py-3">Instance</th>
-                        <th className="text-left px-4 py-3">CMS</th>
-                        <th className="text-left px-4 py-3">SSL</th>
-                        <th className="text-left px-4 py-3">Status</th>
-                        <th className="text-right px-4 py-3">Actions</th>
+                        <th className="text-left px-4 py-3">{t("domain")}</th>
+                        <th className="text-left px-4 py-3">{t("instance")}</th>
+                        <th className="text-left px-4 py-3">{t("cms")}</th>
+                        <th className="text-left px-4 py-3">{t("ssl")}</th>
+                        <th className="text-left px-4 py-3">{tc("status")}</th>
+                        <th className="text-right px-4 py-3">{tc("actions")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -117,11 +120,11 @@ export default function DomainsPage() {
                             <td className="px-4 py-3">
                               {isHttps ? (
                                 <span className="flex items-center gap-1 text-xs text-[var(--success)]">
-                                  <Shield size={12} /> Active
+                                  <Shield size={12} /> {t("sslActive")}
                                 </span>
                               ) : (
                                 <span className="flex items-center gap-1 text-xs text-[var(--warning)]">
-                                  <ShieldOff size={12} /> Pending
+                                  <ShieldOff size={12} /> {t("sslPending")}
                                 </span>
                               )}
                             </td>
@@ -141,7 +144,7 @@ export default function DomainsPage() {
                                 rel="noopener"
                                 className="text-xs px-3 py-1 rounded-md text-[var(--accent)] hover:bg-[var(--accent)]/10 transition-colors inline-flex items-center gap-1"
                               >
-                                <ExternalLink size={12} /> Visit
+                                <ExternalLink size={12} /> {tc("visit")}
                               </a>
                             </td>
                           </tr>
@@ -154,12 +157,12 @@ export default function DomainsPage() {
 
               {/* Info box */}
               <div className="mt-6 bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
-                <h3 className="text-sm font-semibold mb-2">Domain Setup</h3>
+                <h3 className="text-sm font-semibold mb-2">{t("setup.title")}</h3>
                 <div className="text-sm text-[var(--muted)] space-y-1">
-                  <p>1. Point your domain DNS (A record) to your server IP</p>
-                  <p>2. Set the domain when deploying a new instance</p>
-                  <p>3. SSL certificates are automatically provisioned via Let&apos;s Encrypt</p>
-                  <p>4. Nginx reverse proxy is auto-configured with WebSocket support</p>
+                  <p>{t("setup.step1")}</p>
+                  <p>{t("setup.step2")}</p>
+                  <p>{t("setup.step3")}</p>
+                  <p>{t("setup.step4")}</p>
                 </div>
               </div>
             </div>

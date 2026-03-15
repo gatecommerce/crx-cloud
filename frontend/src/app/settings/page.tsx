@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useTranslations, useLocale } from "next-intl";
 import { AuthGuard } from "@/components/AuthGuard";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { StatsBar } from "@/components/dashboard/StatsBar";
@@ -12,14 +13,7 @@ import {
   Shield, ToggleLeft, ToggleRight, Loader2, Upload
 } from "lucide-react";
 
-// ─── Provider icons/labels ───────────────────────────────────────────────────
-const providerLabels: Record<string, string> = {
-  s3: "Amazon S3",
-  azure: "Azure Blob",
-  gcs: "Google Cloud Storage",
-  local: "Local Storage",
-};
-
+// ─── Provider icons ─────────────────────────────────────────────────────────
 const providerIcons: Record<string, any> = {
   s3: Cloud,
   azure: Cloud,
@@ -66,6 +60,8 @@ function AccordionSection({
 
 // ─── Backup Storages Section ─────────────────────────────────────────────────
 function BackupStoragesSection() {
+  const t = useTranslations("settings");
+  const tc = useTranslations("common");
   const [storages, setStorages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -74,6 +70,13 @@ function BackupStoragesSection() {
   const [formConfig, setFormConfig] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  const providerLabels: Record<string, string> = {
+    s3: t("backupStorages.providers.s3"),
+    azure: t("backupStorages.providers.azure"),
+    gcs: t("backupStorages.providers.gcs"),
+    local: t("backupStorages.providers.local"),
+  };
 
   const loadStorages = useCallback(async () => {
     try {
@@ -125,7 +128,7 @@ function BackupStoragesSection() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("Remove this backup storage?")) return;
+    if (!confirm(t("backupStorages.confirmRemove"))) return;
     try {
       await settingsApi.deleteBackupStorage(id);
       loadStorages();
@@ -140,22 +143,22 @@ function BackupStoragesSection() {
 
   const providerFields: Record<string, { key: string; label: string; type?: string }[]> = {
     s3: [
-      { key: "bucket", label: "Bucket" },
-      { key: "region", label: "Region" },
-      { key: "access_key", label: "Access Key" },
-      { key: "secret_key", label: "Secret Key", type: "password" },
+      { key: "bucket", label: t("backupStorages.fields.bucket") },
+      { key: "region", label: t("backupStorages.fields.region") },
+      { key: "access_key", label: t("backupStorages.fields.accessKey") },
+      { key: "secret_key", label: t("backupStorages.fields.secretKey"), type: "password" },
     ],
     azure: [
-      { key: "container", label: "Container" },
-      { key: "account_name", label: "Account Name" },
-      { key: "sas_token", label: "SAS Token", type: "password" },
+      { key: "container", label: t("backupStorages.fields.container") },
+      { key: "account_name", label: t("backupStorages.fields.accountName") },
+      { key: "sas_token", label: t("backupStorages.fields.sasToken"), type: "password" },
     ],
     gcs: [
-      { key: "bucket", label: "Bucket" },
-      { key: "project_id", label: "Project ID" },
-      { key: "service_account_key", label: "Service Account Key (JSON)" },
+      { key: "bucket", label: t("backupStorages.fields.bucket") },
+      { key: "project_id", label: t("backupStorages.fields.projectId") },
+      { key: "service_account_key", label: t("backupStorages.fields.serviceAccountKey") },
     ],
-    local: [{ key: "path", label: "Path" }],
+    local: [{ key: "path", label: t("backupStorages.fields.path") }],
   };
 
   const inputClass =
@@ -174,11 +177,11 @@ function BackupStoragesSection() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-[var(--border)] text-xs text-[var(--muted)]">
-                    <th className="text-left px-4 py-3">Name</th>
-                    <th className="text-left px-4 py-3">Provider</th>
-                    <th className="text-left px-4 py-3">Backups</th>
-                    <th className="text-left px-4 py-3">Size</th>
-                    <th className="text-right px-4 py-3">Status</th>
+                    <th className="text-left px-4 py-3">{t("backupStorages.name")}</th>
+                    <th className="text-left px-4 py-3">{t("backupStorages.provider")}</th>
+                    <th className="text-left px-4 py-3">{t("backupStorages.backups")}</th>
+                    <th className="text-left px-4 py-3">{t("backupStorages.size")}</th>
+                    <th className="text-right px-4 py-3">{t("backupStorages.status")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -216,7 +219,7 @@ function BackupStoragesSection() {
                           <div className="flex items-center justify-end gap-2">
                             {s.is_active ? (
                               <span className="flex items-center gap-1 text-[var(--success)] text-xs font-medium">
-                                <CheckCircle size={14} /> Active
+                                <CheckCircle size={14} /> {tc("active")}
                               </span>
                             ) : (
                               <>
@@ -224,13 +227,13 @@ function BackupStoragesSection() {
                                   onClick={() => handleActivate(s.id)}
                                   className="text-xs px-2.5 py-1 rounded-md bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/20 transition-colors"
                                 >
-                                  Set as active
+                                  {t("backupStorages.setActive")}
                                 </button>
                                 <button
                                   onClick={() => handleDelete(s.id)}
                                   className="text-xs px-2.5 py-1 rounded-md bg-[var(--danger)]/10 text-[var(--danger)] hover:bg-[var(--danger)]/20 transition-colors"
                                 >
-                                  Remove
+                                  {tc("remove")}
                                 </button>
                               </>
                             )}
@@ -246,7 +249,7 @@ function BackupStoragesSection() {
 
           {storages.length === 0 && !showForm && (
             <p className="text-sm text-[var(--muted)] mb-4">
-              No backup storages configured. Add one to enable remote backups.
+              {t("backupStorages.empty")}
             </p>
           )}
 
@@ -255,14 +258,14 @@ function BackupStoragesSection() {
               onClick={() => setShowForm(true)}
               className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
             >
-              <Plus size={16} /> Add
+              <Plus size={16} /> {tc("add")}
             </button>
           ) : (
             <form
               onSubmit={handleCreate}
               className="bg-[var(--background)] border border-[var(--border)] rounded-lg p-4 space-y-3"
             >
-              <h4 className="text-sm font-semibold mb-2">New Backup Storage</h4>
+              <h4 className="text-sm font-semibold mb-2">{t("backupStorages.newStorage")}</h4>
 
               {error && (
                 <div className="text-sm text-[var(--danger)] bg-[var(--danger)]/10 rounded-lg px-3 py-2">
@@ -272,17 +275,17 @@ function BackupStoragesSection() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-[var(--muted)] mb-1">Name</label>
+                  <label className="block text-xs text-[var(--muted)] mb-1">{tc("name")}</label>
                   <input
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
                     className={inputClass}
-                    placeholder="My S3 Bucket"
+                    placeholder={t("backupStorages.placeholder")}
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-[var(--muted)] mb-1">Provider</label>
+                  <label className="block text-xs text-[var(--muted)] mb-1">{t("backupStorages.provider")}</label>
                   <select
                     value={formProvider}
                     onChange={(e) => {
@@ -291,10 +294,10 @@ function BackupStoragesSection() {
                     }}
                     className={inputClass}
                   >
-                    <option value="s3">Amazon S3</option>
-                    <option value="azure">Azure Blob</option>
-                    <option value="gcs">Google Cloud Storage</option>
-                    <option value="local">Local Storage</option>
+                    <option value="s3">{t("backupStorages.providers.s3")}</option>
+                    <option value="azure">{t("backupStorages.providers.azure")}</option>
+                    <option value="gcs">{t("backupStorages.providers.gcs")}</option>
+                    <option value="local">{t("backupStorages.providers.local")}</option>
                   </select>
                 </div>
               </div>
@@ -337,14 +340,14 @@ function BackupStoragesSection() {
                   disabled={saving}
                   className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
                 >
-                  {saving ? "Saving..." : "Save"}
+                  {saving ? tc("saving") : tc("save")}
                 </button>
                 <button
                   type="button"
                   onClick={resetForm}
                   className="px-4 py-2 text-sm text-[var(--muted)] hover:text-[var(--foreground)]"
                 >
-                  Cancel
+                  {tc("cancel")}
                 </button>
               </div>
             </form>
@@ -357,6 +360,9 @@ function BackupStoragesSection() {
 
 // ─── API Keys Section ────────────────────────────────────────────────────────
 function ApiKeysSection() {
+  const t = useTranslations("settings");
+  const tc = useTranslations("common");
+  const locale = useLocale();
   const [keys, setKeys] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -406,7 +412,7 @@ function ApiKeysSection() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("Delete this API key? This action cannot be undone.")) return;
+    if (!confirm(t("apiKeys.confirmDelete"))) return;
     try {
       await settingsApi.deleteApiKey(id);
       loadKeys();
@@ -422,7 +428,7 @@ function ApiKeysSection() {
   }
 
   function formatDate(iso: string) {
-    return new Date(iso).toLocaleDateString("en-US", {
+    return new Date(iso).toLocaleDateString(locale, {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -435,7 +441,7 @@ function ApiKeysSection() {
   return (
     <div>
       <p className="text-sm text-[var(--muted)] mb-4">
-        API keys allow secure programmatic access to your CRX Cloud resources.
+        {t("apiKeys.description")}
       </p>
 
       {/* Newly created key banner */}
@@ -444,7 +450,7 @@ function ApiKeysSection() {
           <div className="flex items-start gap-2 mb-2">
             <AlertTriangle size={16} className="text-[var(--warning)] shrink-0 mt-0.5" />
             <span className="text-sm font-medium text-[var(--warning)]">
-              Save this key — it won&apos;t be shown again
+              {t("apiKeys.saveWarning")}
             </span>
           </div>
           <div className="flex items-center gap-2 bg-[var(--background)] rounded-md px-3 py-2 font-mono text-xs">
@@ -461,7 +467,7 @@ function ApiKeysSection() {
             onClick={() => setNewKey(null)}
             className="text-xs text-[var(--muted)] hover:text-[var(--foreground)] mt-2"
           >
-            Dismiss
+            {tc("cancel")}
           </button>
         </div>
       )}
@@ -477,11 +483,11 @@ function ApiKeysSection() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-[var(--border)] text-xs text-[var(--muted)]">
-                    <th className="text-left px-4 py-3">Name</th>
-                    <th className="text-left px-4 py-3">Key</th>
-                    <th className="text-left px-4 py-3">Status</th>
-                    <th className="text-left px-4 py-3">Created</th>
-                    <th className="text-right px-4 py-3">Actions</th>
+                    <th className="text-left px-4 py-3">{t("apiKeys.name")}</th>
+                    <th className="text-left px-4 py-3">{t("apiKeys.key")}</th>
+                    <th className="text-left px-4 py-3">{t("apiKeys.status")}</th>
+                    <th className="text-left px-4 py-3">{t("apiKeys.created")}</th>
+                    <th className="text-right px-4 py-3">{tc("actions")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -498,7 +504,7 @@ function ApiKeysSection() {
                         <button
                           onClick={() => handleToggle(k.id)}
                           className="flex items-center gap-1.5"
-                          title={k.is_active ? "Deactivate" : "Activate"}
+                          title={k.is_active ? t("apiKeys.deactivate") : t("apiKeys.activate")}
                         >
                           {k.is_active ? (
                             <ToggleRight size={20} className="text-[var(--success)]" />
@@ -510,7 +516,7 @@ function ApiKeysSection() {
                               k.is_active ? "text-[var(--success)]" : "text-[var(--muted)]"
                             }`}
                           >
-                            {k.is_active ? "Active" : "Inactive"}
+                            {k.is_active ? tc("active") : t("apiKeys.status")}
                           </span>
                         </button>
                       </td>
@@ -521,7 +527,7 @@ function ApiKeysSection() {
                         <button
                           onClick={() => handleDelete(k.id)}
                           className="text-[var(--muted)] hover:text-[var(--danger)] transition-colors"
-                          title="Delete key"
+                          title={t("apiKeys.deleteKey")}
                         >
                           <Trash2 size={14} />
                         </button>
@@ -535,7 +541,7 @@ function ApiKeysSection() {
 
           {keys.length === 0 && !showForm && (
             <p className="text-sm text-[var(--muted)] mb-4">
-              No API keys created yet.
+              {t("apiKeys.empty")}
             </p>
           )}
 
@@ -544,14 +550,14 @@ function ApiKeysSection() {
               onClick={() => setShowForm(true)}
               className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
             >
-              <Plus size={16} /> Generate
+              <Plus size={16} /> {tc("generate")}
             </button>
           ) : (
             <form
               onSubmit={handleCreate}
               className="bg-[var(--background)] border border-[var(--border)] rounded-lg p-4 space-y-3"
             >
-              <h4 className="text-sm font-semibold mb-2">Generate API Key</h4>
+              <h4 className="text-sm font-semibold mb-2">{t("apiKeys.generateKey")}</h4>
 
               {error && (
                 <div className="text-sm text-[var(--danger)] bg-[var(--danger)]/10 rounded-lg px-3 py-2">
@@ -560,12 +566,12 @@ function ApiKeysSection() {
               )}
 
               <div>
-                <label className="block text-xs text-[var(--muted)] mb-1">Name</label>
+                <label className="block text-xs text-[var(--muted)] mb-1">{tc("name")}</label>
                 <input
                   value={formName}
                   onChange={(e) => setFormName(e.target.value)}
                   className={inputClass}
-                  placeholder="e.g. CI/CD Pipeline"
+                  placeholder={t("apiKeys.namePlaceholder")}
                   required
                 />
               </div>
@@ -576,7 +582,7 @@ function ApiKeysSection() {
                   disabled={saving}
                   className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
                 >
-                  {saving ? "Generating..." : "Generate Key"}
+                  {saving ? tc("generating") : t("apiKeys.generateKey")}
                 </button>
                 <button
                   type="button"
@@ -587,7 +593,7 @@ function ApiKeysSection() {
                   }}
                   className="px-4 py-2 text-sm text-[var(--muted)] hover:text-[var(--foreground)]"
                 >
-                  Cancel
+                  {tc("cancel")}
                 </button>
               </div>
             </form>
@@ -600,6 +606,8 @@ function ApiKeysSection() {
 
 // ─── Account Management Section ──────────────────────────────────────────────
 function AccountSection() {
+  const t = useTranslations("settings");
+  const tc = useTranslations("common");
   const [account, setAccount] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
@@ -619,7 +627,7 @@ function AccountSection() {
       setConfirmDelete(true);
       return;
     }
-    const typed = prompt('Type "DELETE" to permanently delete your account:');
+    const typed = prompt(t("account.typeDelete"));
     if (typed !== "DELETE") {
       setConfirmDelete(false);
       return;
@@ -627,7 +635,7 @@ function AccountSection() {
     setDeleting(true);
     try {
       // The endpoint would handle account deletion
-      alert("Account deletion requested. This feature is not yet available.");
+      alert(t("account.accountDeletionNotAvailable"));
     } finally {
       setDeleting(false);
       setConfirmDelete(false);
@@ -647,25 +655,25 @@ function AccountSection() {
       {account ? (
         <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <InfoCard label="Telegram ID" value={account.telegram_id || "-"} />
-            <InfoCard label="Name" value={account.name || "-"} />
-            <InfoCard label="Language" value={account.lang || account.language || "-"} />
-            <InfoCard label="Role" value={account.is_admin ? "Admin" : "User"} />
+            <InfoCard label={t("account.telegramId")} value={account.telegram_id || "-"} />
+            <InfoCard label={t("account.name")} value={account.name || "-"} />
+            <InfoCard label={t("account.language")} value={account.lang || account.language || "-"} />
+            <InfoCard label={t("account.role")} value={account.is_admin ? t("account.admin") : t("account.user")} />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <StatCard label="Servers" value={account.servers_count ?? account.stats?.servers ?? 0} />
-            <StatCard label="Instances" value={account.instances_count ?? account.stats?.instances ?? 0} />
-            <StatCard label="Backups" value={account.backups_count ?? account.stats?.backups ?? 0} />
+            <StatCard label={t("account.servers")} value={account.servers_count ?? account.stats?.servers ?? 0} />
+            <StatCard label={t("account.instances")} value={account.instances_count ?? account.stats?.instances ?? 0} />
+            <StatCard label={t("account.backups")} value={account.backups_count ?? account.stats?.backups ?? 0} />
           </div>
 
           {/* Danger zone */}
           <div className="mt-6 pt-4 border-t border-[var(--border)]">
             <h4 className="text-sm font-semibold text-[var(--danger)] mb-2 flex items-center gap-2">
-              <Shield size={14} /> Danger Zone
+              <Shield size={14} /> {t("account.dangerZone")}
             </h4>
             <p className="text-xs text-[var(--muted)] mb-3">
-              Permanently delete your account and all associated data. This action cannot be undone.
+              {t("account.dangerDescription")}
             </p>
             <button
               onClick={handleDeleteAccount}
@@ -678,23 +686,23 @@ function AccountSection() {
             >
               <Trash2 size={14} />
               {deleting
-                ? "Deleting..."
+                ? tc("saving")
                 : confirmDelete
-                ? "Confirm Delete Account"
-                : "Delete Account"}
+                ? t("account.confirmDeleteAccount")
+                : t("account.deleteAccount")}
             </button>
             {confirmDelete && (
               <button
                 onClick={() => setConfirmDelete(false)}
                 className="ml-3 text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
               >
-                Cancel
+                {tc("cancel")}
               </button>
             )}
           </div>
         </div>
       ) : (
-        <p className="text-sm text-[var(--muted)]">Unable to load account information.</p>
+        <p className="text-sm text-[var(--muted)]">{t("account.unableToLoad")}</p>
       )}
     </div>
   );
@@ -702,6 +710,9 @@ function AccountSection() {
 
 // ─── Enterprise Edition Section ──────────────────────────────────────────────
 function EnterpriseSection() {
+  const t = useTranslations("settings");
+  const tc = useTranslations("common");
+  const locale = useLocale();
   const [packages, setPackages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -740,7 +751,7 @@ function EnterpriseSection() {
       const result = await settingsApi.uploadEnterprise(uploadFile);
       setUploadFile(null);
       setShowUploadModal(false);
-      setSuccessMsg(`Odoo ${result.version} Enterprise package uploaded successfully (${result.size_mb} MB)`);
+      setSuccessMsg(t("enterprise.uploadSuccess", { version: result.version, size: result.size_mb }));
       loadPackages();
     } catch (err: any) {
       setError(err.message);
@@ -750,7 +761,7 @@ function EnterpriseSection() {
   }
 
   async function handleDelete(version: string) {
-    if (!confirm(`Delete Enterprise package for Odoo ${version}?`)) return;
+    if (!confirm(t("enterprise.confirmDelete", { version }))) return;
     try {
       await settingsApi.deleteEnterprise(version);
       loadPackages();
@@ -769,7 +780,7 @@ function EnterpriseSection() {
 
   function formatDate(iso: string) {
     if (!iso) return "-";
-    return new Date(iso).toLocaleDateString("en-US", {
+    return new Date(iso).toLocaleDateString(locale, {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -782,7 +793,7 @@ function EnterpriseSection() {
   return (
     <div>
       <p className="text-sm text-[var(--muted)] mb-4">
-        Upload Odoo Enterprise packages to enable Enterprise Edition on your instances.
+        {t("enterprise.description")}
       </p>
 
       {loading ? (
@@ -796,11 +807,11 @@ function EnterpriseSection() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-[var(--border)] text-xs text-[var(--muted)]">
-                    <th className="text-left px-4 py-3">Version</th>
-                    <th className="text-left px-4 py-3">Package Revision</th>
-                    <th className="text-left px-4 py-3">Uploaded</th>
-                    <th className="text-left px-4 py-3">Size</th>
-                    <th className="text-right px-4 py-3">Actions</th>
+                    <th className="text-left px-4 py-3">{t("enterprise.version")}</th>
+                    <th className="text-left px-4 py-3">{t("enterprise.packageRevision")}</th>
+                    <th className="text-left px-4 py-3">{t("enterprise.uploaded")}</th>
+                    <th className="text-left px-4 py-3">{tc("size")}</th>
+                    <th className="text-right px-4 py-3">{tc("actions")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -827,7 +838,7 @@ function EnterpriseSection() {
                         <button
                           onClick={() => handleDelete(pkg.version)}
                           className="text-[var(--muted)] hover:text-[var(--danger)] transition-colors"
-                          title="Delete package"
+                          title={t("enterprise.confirmDelete", { version: pkg.version })}
                         >
                           <Trash2 size={14} />
                         </button>
@@ -841,7 +852,7 @@ function EnterpriseSection() {
 
           {packages.length === 0 && (
             <p className="text-sm text-[var(--muted)] mb-4">
-              No Enterprise packages uploaded yet. Upload one to enable Enterprise Edition on your instances.
+              {t("enterprise.empty")}
             </p>
           )}
 
@@ -855,7 +866,7 @@ function EnterpriseSection() {
             onClick={() => { setShowUploadModal(true); setError(""); setSuccessMsg(""); setUploadFile(null); setDetectedVersion(""); }}
             className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
           >
-            <Upload size={16} /> Upload Enterprise Sources
+            <Upload size={16} /> {t("enterprise.uploadSources")}
           </button>
 
           {/* Upload Modal */}
@@ -863,16 +874,16 @@ function EnterpriseSection() {
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => !uploading && setShowUploadModal(false)}>
               <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-lg mx-4 p-6" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-center justify-between mb-5">
-                  <h3 className="text-lg font-semibold">Upload Odoo Enterprise Sources</h3>
+                  <h3 className="text-lg font-semibold">{t("enterprise.uploadTitle")}</h3>
                   <button onClick={() => !uploading && setShowUploadModal(false)} className="text-[var(--muted)] hover:text-[var(--foreground)] text-xl leading-none">&times;</button>
                 </div>
 
                 <ol className="text-sm text-[var(--muted)] space-y-2 mb-5 list-decimal list-inside">
-                  <li>Go to <span className="text-[var(--accent)] font-medium">odoo.com/page/download</span></li>
-                  <li>Click the <strong className="text-[var(--foreground)]">Download</strong> button next to <strong className="text-[var(--foreground)]">Sources</strong> for the matching Odoo <strong className="text-[var(--foreground)]">Enterprise</strong> version</li>
-                  <li>If requested, enter your Odoo Enterprise license key</li>
-                  <li>Do not unzip the file (only .tar.gz extension is accepted)</li>
-                  <li>Please use the form below to upload the file:</li>
+                  <li>{t("enterprise.uploadStep1")}</li>
+                  <li>{t("enterprise.uploadStep2")}</li>
+                  <li>{t("enterprise.uploadStep3")}</li>
+                  <li>{t("enterprise.uploadStep4")}</li>
+                  <li>{t("enterprise.uploadStep5")}</li>
                 </ol>
 
                 {error && (
@@ -883,7 +894,7 @@ function EnterpriseSection() {
 
                 <form onSubmit={handleUpload} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium mb-1.5">File</label>
+                    <label className="block text-sm font-medium mb-1.5">{t("enterprise.file")}</label>
                     <input
                       type="file"
                       accept=".tar.gz,.zip,.tgz"
@@ -899,12 +910,12 @@ function EnterpriseSection() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium mb-1.5">Version</label>
+                    <label className="block text-sm font-medium mb-1.5">{t("enterprise.version")}</label>
                     <input
                       type="text"
                       value={detectedVersion}
                       readOnly
-                      placeholder="Auto-detected from file"
+                      placeholder={t("enterprise.autoDetected")}
                       className={`${inputClass} bg-[var(--card)] text-[var(--muted)]`}
                     />
                   </div>
@@ -916,7 +927,7 @@ function EnterpriseSection() {
                       disabled={uploading}
                       className="px-4 py-2 text-sm text-[var(--muted)] hover:text-[var(--foreground)]"
                     >
-                      Cancel
+                      {tc("cancel")}
                     </button>
                     <button
                       type="submit"
@@ -924,9 +935,9 @@ function EnterpriseSection() {
                       className="px-5 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-50 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
                     >
                       {uploading ? (
-                        <><Loader2 size={14} className="animate-spin" /> Uploading...</>
+                        <><Loader2 size={14} className="animate-spin" /> {tc("saving")}</>
                       ) : (
-                        <><Upload size={14} /> Upload</>
+                        <><Upload size={14} /> {tc("save")}</>
                       )}
                     </button>
                   </div>
@@ -968,6 +979,8 @@ function formatSize(bytes: number): string {
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
 export default function SettingsPage() {
+  const t = useTranslations("settings");
+
   return (
     <AuthGuard>
       <div className="flex h-screen">
@@ -976,22 +989,22 @@ export default function SettingsPage() {
           <StatsBar />
           <main className="flex-1 overflow-y-auto p-6">
             <div className="max-w-5xl mx-auto">
-              <h1 className="text-2xl font-bold mb-6">Settings</h1>
+              <h1 className="text-2xl font-bold mb-6">{t("title")}</h1>
 
               <div className="space-y-4">
-                <AccordionSection title="Backup Storages" icon={HardDrive} defaultOpen>
+                <AccordionSection title={t("backupStorages.title")} icon={HardDrive} defaultOpen>
                   <BackupStoragesSection />
                 </AccordionSection>
 
-                <AccordionSection title="Enterprise Edition" icon={Shield}>
+                <AccordionSection title={t("enterprise.title")} icon={Shield}>
                   <EnterpriseSection />
                 </AccordionSection>
 
-                <AccordionSection title="API Keys" icon={Key}>
+                <AccordionSection title={t("apiKeys.title")} icon={Key}>
                   <ApiKeysSection />
                 </AccordionSection>
 
-                <AccordionSection title="Account Management" icon={UserCog}>
+                <AccordionSection title={t("account.title")} icon={UserCog}>
                   <AccountSection />
                 </AccordionSection>
               </div>
