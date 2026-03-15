@@ -5,10 +5,13 @@ import secrets
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+import httpx
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from sqlalchemy.orm.attributes import flag_modified
 
 from api.models.instance import Instance
 from api.models.server import Server
@@ -107,158 +110,193 @@ def _find_addon(config: dict, addon_id: str) -> dict | None:
 
 async def _bg_clone_addon(instance_id: str, server_id: str, addon_id: str):
     """Background: clone git repo on remote server, scan modules, update status."""
-    async with async_session() as db:
-        result = await db.execute(select(Instance).where(Instance.id == instance_id))
-        inst = result.scalar_one_or_none()
-        if not inst:
-            return
-        srv_result = await db.execute(select(Server).where(Server.id == server_id))
-        server = srv_result.scalar_one_or_none()
-        if not server:
-            return
+    try:
+        async with async_session() as db:
+            result = await db.execute(select(Instance).where(Instance.id == instance_id))
+            inst = result.scalar_one_or_none()
+            if not inst:
+                logger.warning(f"bg_clone: instance {instance_id} not found")
+                return
+            srv_result = await db.execute(select(Server).where(Server.id == server_id))
+            server = srv_result.scalar_one_or_none()
+            if not server:
+                logger.warning(f"bg_clone: server {server_id} not found")
+                return
 
-        config = dict(inst.config or {})
-        addon = _find_addon(config, addon_id)
-        if not addon:
-            return
-
-        plugin = get_plugin(inst.cms_type)
-        if not plugin:
-            addon["status"] = "error"
-            addon["error"] = f"No plugin for {inst.cms_type}"
-            inst.config = config
-            await db.commit()
-            return
-
-        try:
-            addon["status"] = "cloning"
-            inst.config = config
-            await db.commit()
-            await db.refresh(inst)
             config = dict(inst.config or {})
             addon = _find_addon(config, addon_id)
+            if not addon:
+                logger.warning(f"bg_clone: addon {addon_id} not found in config")
+                return
 
-            cms = _db_to_cms_instance(inst, server)
-            # Use clone_url (may contain PAT) for actual git clone
-            clone_url = addon.get("clone_url") or addon["url"]
-            clone_result = await plugin.clone_addon(
-                cms, addon_id, clone_url, addon["branch"]
-            )
-
-            addon["current_commit"] = clone_result.get("commit", "")
-            addon["modules"] = clone_result.get("modules", [])
-            addon["status"] = "installed"
-            addon["error"] = ""
-
-            # Update compose to mount the new addon dir
-            inst.config = config
-            await db.commit()
-            await db.refresh(inst)
-
-            # Regenerate compose + restart to pick up new addon path
-            cms = _db_to_cms_instance(inst, server)
-            await plugin.update_compose(cms, config)
-
-            # Update module list in Odoo
-            await plugin.update_module_list(cms)
-
-            logger.info(f"Git addon {addon_id} cloned for instance {instance_id}")
-
-        except Exception as e:
-            logger.error(f"Git addon clone failed for {addon_id}: {e}")
-            # Re-read config in case it changed
-            await db.refresh(inst)
-            config = dict(inst.config or {})
-            addon = _find_addon(config, addon_id)
-            if addon:
+            plugin = get_plugin(inst.cms_type)
+            if not plugin:
                 addon["status"] = "error"
-                addon["error"] = str(e)
+                addon["error"] = f"No plugin for {inst.cms_type}"
                 inst.config = config
+                flag_modified(inst, "config")
                 await db.commit()
+                return
+
+            try:
+                addon["status"] = "cloning"
+                inst.config = config
+                flag_modified(inst, "config")
+                await db.commit()
+                await db.refresh(inst)
+                config = dict(inst.config or {})
+                addon = _find_addon(config, addon_id)
+
+                cms = _db_to_cms_instance(inst, server)
+                # Use clone_url (may contain PAT) for actual git clone
+                clone_url = addon.get("clone_url") or addon["url"]
+                logger.info(f"bg_clone: cloning {addon['url']}@{addon['branch']} for {instance_id}")
+                clone_result = await plugin.clone_addon(
+                    cms, addon_id, clone_url, addon["branch"]
+                )
+
+                addon["current_commit"] = clone_result.get("commit", "")
+                addon["modules"] = clone_result.get("modules", [])
+                addon["status"] = "installed"
+                addon["error"] = ""
+
+                # Update compose to mount the new addon dir
+                inst.config = config
+                flag_modified(inst, "config")
+                await db.commit()
+                await db.refresh(inst)
+
+                # Regenerate compose + restart to pick up new addon path
+                cms = _db_to_cms_instance(inst, server)
+                await plugin.update_compose(cms, config)
+
+                # Update module list in Odoo
+                try:
+                    await plugin.update_module_list(cms)
+                except Exception as mu_err:
+                    logger.warning(f"bg_clone: update_module_list failed (non-fatal): {mu_err}")
+
+                logger.info(f"Git addon {addon_id} cloned for instance {instance_id}")
+
+            except Exception as e:
+                logger.error(f"Git addon clone failed for {addon_id}: {e}", exc_info=True)
+                # Re-read config in case it changed
+                await db.refresh(inst)
+                config = dict(inst.config or {})
+                addon = _find_addon(config, addon_id)
+                if addon:
+                    addon["status"] = "error"
+                    addon["error"] = str(e)
+                    inst.config = config
+                    flag_modified(inst, "config")
+                    await db.commit()
+
+    except Exception as outer_err:
+        logger.error(f"bg_clone OUTER error for addon {addon_id}: {outer_err}", exc_info=True)
+        # Last resort: try to mark as error
+        try:
+            async with async_session() as db2:
+                result = await db2.execute(select(Instance).where(Instance.id == instance_id))
+                inst = result.scalar_one_or_none()
+                if inst:
+                    config = dict(inst.config or {})
+                    addon = _find_addon(config, addon_id)
+                    if addon:
+                        addon["status"] = "error"
+                        addon["error"] = f"Background task failed: {outer_err}"
+                        inst.config = config
+                        flag_modified(inst, "config")
+                        await db2.commit()
+        except Exception:
+            logger.error(f"bg_clone: even error recovery failed for {addon_id}")
 
 
 async def _bg_update_addon(instance_id: str, server_id: str, addon_id: str):
     """Background: pull latest changes for a git addon."""
-    async with async_session() as db:
-        result = await db.execute(select(Instance).where(Instance.id == instance_id))
-        inst = result.scalar_one_or_none()
-        if not inst:
-            return
-        srv_result = await db.execute(select(Server).where(Server.id == server_id))
-        server = srv_result.scalar_one_or_none()
-        if not server:
-            return
+    try:
+        async with async_session() as db:
+            result = await db.execute(select(Instance).where(Instance.id == instance_id))
+            inst = result.scalar_one_or_none()
+            if not inst:
+                return
+            srv_result = await db.execute(select(Server).where(Server.id == server_id))
+            server = srv_result.scalar_one_or_none()
+            if not server:
+                return
 
-        config = dict(inst.config or {})
-        addon = _find_addon(config, addon_id)
-        if not addon:
-            return
-
-        plugin = get_plugin(inst.cms_type)
-        if not plugin:
-            return
-
-        old_commit = addon.get("current_commit", "")
-
-        try:
-            cms = _db_to_cms_instance(inst, server)
-            pull_result = await plugin.pull_addon(cms, addon_id, addon["branch"])
-
-            addon["current_commit"] = pull_result.get("new_commit", old_commit)
-
-            if pull_result.get("changed", False):
-                # Re-scan modules
-                modules = await plugin.scan_addon_modules(cms, addon_id)
-                addon["modules"] = modules
-
-                # Install requirements if auto-enabled
-                if addon.get("auto_install_requirements"):
-                    try:
-                        await plugin.install_addon_requirements(cms, addon_id)
-                    except Exception as e:
-                        logger.warning(f"Failed to install requirements for {addon_id}: {e}")
-
-                # Upgrade modules if auto-enabled
-                if addon.get("auto_upgrade_modules"):
-                    try:
-                        await plugin.update_module_list(cms)
-                    except Exception as e:
-                        logger.warning(f"Failed to upgrade modules for {addon_id}: {e}")
-
-            addon["status"] = "installed"
-            addon["error"] = ""
-            inst.config = config
-            await db.commit()
-
-            logger.info(
-                f"Git addon {addon_id} updated: {old_commit[:8]}..{addon['current_commit'][:8]}"
-            )
-
-        except Exception as e:
-            logger.error(f"Git addon update failed for {addon_id}: {e}")
-            # Rollback: reset to old commit
-            try:
-                server_info = _server_info_from_db(server)
-                prefix = config.get("prefix", "")
-                from core.vm_controller import VMDriver
-                vm = VMDriver()
-                addon_dir = f"/opt/crx-cloud/instances/{prefix}/addons/{addon_id}"
-                await vm._ssh_exec(
-                    server_info,
-                    f"git -C {addon_dir} reset --hard {old_commit}"
-                )
-                logger.info(f"Rolled back addon {addon_id} to {old_commit[:8]}")
-            except Exception as rb_err:
-                logger.error(f"Rollback failed for addon {addon_id}: {rb_err}")
-
-            await db.refresh(inst)
             config = dict(inst.config or {})
             addon = _find_addon(config, addon_id)
-            if addon:
-                addon["status"] = "error"
-                addon["error"] = str(e)
+            if not addon:
+                return
+
+            plugin = get_plugin(inst.cms_type)
+            if not plugin:
+                return
+
+            old_commit = addon.get("current_commit", "")
+
+            try:
+                cms = _db_to_cms_instance(inst, server)
+                pull_result = await plugin.pull_addon(cms, addon_id, addon["branch"])
+
+                addon["current_commit"] = pull_result.get("new_commit", old_commit)
+
+                if pull_result.get("changed", False):
+                    modules = await plugin.scan_addon_modules(cms, addon_id)
+                    addon["modules"] = modules
+
+                    if addon.get("auto_install_requirements"):
+                        try:
+                            await plugin.install_addon_requirements(cms, addon_id)
+                        except Exception as e:
+                            logger.warning(f"Failed to install requirements for {addon_id}: {e}")
+
+                    if addon.get("auto_upgrade_modules"):
+                        try:
+                            await plugin.update_module_list(cms)
+                        except Exception as e:
+                            logger.warning(f"Failed to upgrade modules for {addon_id}: {e}")
+
+                addon["status"] = "installed"
+                addon["error"] = ""
                 inst.config = config
+                flag_modified(inst, "config")
                 await db.commit()
+
+                logger.info(
+                    f"Git addon {addon_id} updated: {old_commit[:8]}..{addon['current_commit'][:8]}"
+                )
+
+            except Exception as e:
+                logger.error(f"Git addon update failed for {addon_id}: {e}", exc_info=True)
+                # Rollback: reset to old commit
+                if old_commit:
+                    try:
+                        server_info = _server_info_from_db(server)
+                        prefix = config.get("prefix", "")
+                        from core.vm_controller import VMDriver
+                        vm = VMDriver()
+                        addon_dir = f"/opt/crx-cloud/instances/{prefix}/addons/{addon_id}"
+                        await vm._ssh_exec(
+                            server_info,
+                            f"git -C {addon_dir} reset --hard {old_commit}"
+                        )
+                        logger.info(f"Rolled back addon {addon_id} to {old_commit[:8]}")
+                    except Exception as rb_err:
+                        logger.error(f"Rollback failed for addon {addon_id}: {rb_err}")
+
+                await db.refresh(inst)
+                config = dict(inst.config or {})
+                addon = _find_addon(config, addon_id)
+                if addon:
+                    addon["status"] = "error"
+                    addon["error"] = str(e)
+                    inst.config = config
+                    flag_modified(inst, "config")
+                    await db.commit()
+
+    except Exception as outer_err:
+        logger.error(f"bg_update OUTER error for addon {addon_id}: {outer_err}", exc_info=True)
 
 
 async def _bg_remove_addon(instance_id: str, server_id: str, addon_id: str):
@@ -345,28 +383,50 @@ async def list_addons(
             "update_available": update_available,
         })
 
-    # Git addons — never expose clone_url (may contain PAT)
+    # Git addons + Marketplace modules — never expose clone_url (may contain PAT)
     for ga in _get_git_addons(config):
-        addons.append({
-            "type": "git",
-            "id": ga.get("id", ""),
-            "name": ga.get("url", "").rstrip("/").rsplit("/", 1)[-1].replace(".git", ""),
-            "url": ga.get("url", ""),  # Display URL only, no token
-            "branch": ga.get("branch", ""),
-            "status": ga.get("status", "pending"),
-            "current_commit": ga.get("current_commit", ""),
-            "has_token": ga.get("has_token", False),
-            "auto_update": ga.get("auto_update", False),
-            "auto_install_requirements": ga.get("auto_install_requirements", False),
-            "auto_upgrade_modules": ga.get("auto_upgrade_modules", False),
-            "copy_method": ga.get("copy_method", "all"),
-            "specific_addons": ga.get("specific_addons", []),
-            "modules": ga.get("modules", []),
-            "error": ga.get("error", ""),
-            "added_at": ga.get("added_at", ""),
-            "can_update": ga.get("status") == "installed",
-            "can_delete": ga.get("status") != "cloning",
-        })
+        addon_type = ga.get("type", "git")
+        if addon_type == "marketplace":
+            addons.append({
+                "type": "marketplace",
+                "id": ga.get("id", ""),
+                "name": ga.get("module_name", ""),
+                "display_name": ga.get("module_name", "").replace("_", " ").title(),
+                "repo_name": ga.get("repo_name", ""),
+                "url": ga.get("url", ""),
+                "branch": ga.get("branch", ""),
+                "status": ga.get("status", "pending"),
+                "current_commit": ga.get("current_commit", ""),
+                "modules": ga.get("modules", []),
+                "error": ga.get("error", ""),
+                "added_at": ga.get("added_at", ""),
+                "auto_update": ga.get("auto_update", False),
+                "auto_install_requirements": ga.get("auto_install_requirements", False),
+                "auto_upgrade_modules": ga.get("auto_upgrade_modules", False),
+                "can_update": ga.get("status") == "installed",
+                "can_delete": ga.get("status") != "cloning",
+            })
+        else:
+            addons.append({
+                "type": "git",
+                "id": ga.get("id", ""),
+                "name": ga.get("url", "").rstrip("/").rsplit("/", 1)[-1].replace(".git", ""),
+                "url": ga.get("url", ""),
+                "branch": ga.get("branch", ""),
+                "status": ga.get("status", "pending"),
+                "current_commit": ga.get("current_commit", ""),
+                "has_token": ga.get("has_token", False),
+                "auto_update": ga.get("auto_update", False),
+                "auto_install_requirements": ga.get("auto_install_requirements", False),
+                "auto_upgrade_modules": ga.get("auto_upgrade_modules", False),
+                "copy_method": ga.get("copy_method", "all"),
+                "specific_addons": ga.get("specific_addons", []),
+                "modules": ga.get("modules", []),
+                "error": ga.get("error", ""),
+                "added_at": ga.get("added_at", ""),
+                "can_update": ga.get("status") == "installed",
+                "can_delete": ga.get("status") != "cloning",
+            })
 
     return addons
 
@@ -395,6 +455,14 @@ async def add_git_addon(
 
     # Build clone URL with token for private repos
     access_token = body.access_token.strip() if body.access_token else ""
+
+    # Auto-inject GitHub OAuth token if user has one and no explicit PAT given
+    if not access_token and "github.com" in url:
+        from api.routes.github_oauth import get_github_token_for_user
+        gh_token = await get_github_token_for_user(user["telegram_id"])
+        if gh_token:
+            access_token = gh_token
+
     clone_url = url
     if access_token and url.startswith("https://"):
         # Insert token into URL: https://TOKEN@github.com/org/repo.git
@@ -432,6 +500,7 @@ async def add_git_addon(
         config["webhook_secret"] = secrets.token_urlsafe(24)
 
     inst.config = config
+    flag_modified(inst, "config")
     await db.commit()
     await db.refresh(inst)
 
@@ -468,6 +537,7 @@ async def update_git_addon_settings(
         addon["auto_upgrade_modules"] = body.auto_upgrade_modules
 
     inst.config = config
+    flag_modified(inst, "config")
     await db.commit()
 
     return {"detail": "Addon settings updated", "addon_id": addon_id}
@@ -529,6 +599,7 @@ async def delete_git_addon(
     # Remove from config immediately
     config["git_addons"] = [ga for ga in git_addons if ga.get("id") != addon_id]
     inst.config = config
+    flag_modified(inst, "config")
     await db.commit()
 
     # Remove files from server in background
@@ -565,6 +636,7 @@ async def list_addon_modules(
     # Update cached modules in config
     addon["modules"] = modules
     inst.config = config
+    flag_modified(inst, "config")
     await db.commit()
 
     return {"addon_id": addon_id, "modules": modules}
@@ -710,3 +782,385 @@ async def addon_webhook(
             updated.append(ga["id"])
 
     return {"detail": f"Webhook received, updating {len(updated)} addon(s)", "updated": updated}
+
+
+# ---------------------------------------------------------------------------
+# Marketplace — browse individual OCA modules, install via sparse checkout
+# ---------------------------------------------------------------------------
+
+class MarketplaceInstall(BaseModel):
+    repo_url: str       # e.g. "https://github.com/OCA/web.git"
+    module_name: str    # e.g. "web_responsive"
+    branch: str = ""    # defaults to instance.version
+
+
+async def _bg_marketplace_install(
+    instance_id: str, server_id: str, addon_id: str,
+    repo_url: str, module_name: str, branch: str,
+):
+    """Background: sparse-clone a single module from a repo."""
+    try:
+        async with async_session() as db:
+            result = await db.execute(select(Instance).where(Instance.id == instance_id))
+            inst = result.scalar_one_or_none()
+            if not inst:
+                return
+            srv_result = await db.execute(select(Server).where(Server.id == server_id))
+            server = srv_result.scalar_one_or_none()
+            if not server:
+                return
+
+            config = dict(inst.config or {})
+            addon = _find_addon(config, addon_id)
+            if not addon:
+                return
+
+            plugin = get_plugin(inst.cms_type)
+            if not plugin:
+                addon["status"] = "error"
+                addon["error"] = f"No plugin for {inst.cms_type}"
+                inst.config = config
+                flag_modified(inst, "config")
+                await db.commit()
+                return
+
+            try:
+                addon["status"] = "cloning"
+                inst.config = config
+                flag_modified(inst, "config")
+                await db.commit()
+                await db.refresh(inst)
+                config = dict(inst.config or {})
+                addon = _find_addon(config, addon_id)
+
+                cms = _db_to_cms_instance(inst, server)
+                logger.info(f"Marketplace install: {module_name} from {repo_url}@{branch}")
+                clone_result = await plugin.clone_addon_sparse(
+                    cms, addon_id, repo_url, branch, module_name
+                )
+
+                addon["current_commit"] = clone_result.get("commit", "")
+                addon["modules"] = clone_result.get("modules", [])
+                addon["status"] = "installed"
+                addon["error"] = ""
+
+                inst.config = config
+                flag_modified(inst, "config")
+                await db.commit()
+                await db.refresh(inst)
+
+                # Regenerate compose + restart
+                cms = _db_to_cms_instance(inst, server)
+                await plugin.update_compose(cms, config)
+
+                try:
+                    await plugin.update_module_list(cms)
+                except Exception as e:
+                    logger.warning(f"Marketplace: update_module_list failed (non-fatal): {e}")
+
+                logger.info(f"Marketplace module {module_name} installed for {instance_id}")
+
+            except Exception as e:
+                logger.error(f"Marketplace install failed for {module_name}: {e}", exc_info=True)
+                await db.refresh(inst)
+                config = dict(inst.config or {})
+                addon = _find_addon(config, addon_id)
+                if addon:
+                    addon["status"] = "error"
+                    addon["error"] = str(e)
+                    inst.config = config
+                    flag_modified(inst, "config")
+                    await db.commit()
+
+    except Exception as outer_err:
+        logger.error(f"Marketplace OUTER error for {module_name}: {outer_err}", exc_info=True)
+        try:
+            async with async_session() as db2:
+                result = await db2.execute(select(Instance).where(Instance.id == instance_id))
+                inst = result.scalar_one_or_none()
+                if inst:
+                    config = dict(inst.config or {})
+                    addon = _find_addon(config, addon_id)
+                    if addon:
+                        addon["status"] = "error"
+                        addon["error"] = f"Background task failed: {outer_err}"
+                        inst.config = config
+                        flag_modified(inst, "config")
+                        await db2.commit()
+        except Exception:
+            pass
+
+
+@router.get("/{instance_id}/marketplace")
+async def get_marketplace(
+    instance_id: str,
+    search: str = "",
+    category: str = "",
+    source: str = "",
+    page: int = 1,
+    per_page: int = 24,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+    request: Request = None,
+):
+    """Browse available modules from multiple sources (OCA, Cybrosys, Odoo Mates, Odoo)."""
+    from core.marketplace import marketplace_service
+    from api.routes.github_oauth import get_github_token
+
+    result = await db.execute(
+        select(Instance).where(Instance.id == instance_id, Instance.owner_id == user["telegram_id"])
+    )
+    inst = result.scalar_one_or_none()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    branch = inst.version  # e.g. "17.0", "18.0"
+    gh_token = get_github_token(request) if request else None
+
+    data = await marketplace_service.search_modules(
+        branch=branch,
+        search=search,
+        category=category,
+        source=source,
+        page=page,
+        per_page=per_page,
+        user_token=gh_token,
+    )
+
+    # Mark already-installed modules
+    config = inst.config or {}
+    installed_modules = set()
+    for ga in _get_git_addons(config):
+        if ga.get("type") == "marketplace" and ga.get("status") in ("installed", "cloning", "pending"):
+            installed_modules.add(ga.get("module_name", ""))
+        # Also check full-repo addons' modules
+        for mod in ga.get("modules", []):
+            installed_modules.add(mod.get("technical_name", ""))
+
+    for mod in data.get("modules", []):
+        mod["installed"] = mod["technical_name"] in installed_modules
+
+    return data
+
+
+@router.post("/{instance_id}/marketplace/install", status_code=201)
+async def install_marketplace_module(
+    instance_id: str,
+    body: MarketplaceInstall,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Install a single module from OCA marketplace via sparse checkout."""
+    inst, server = await _get_instance_and_server(instance_id, user["telegram_id"], db)
+
+    if inst.status not in ("running", "stopped"):
+        raise HTTPException(status_code=400, detail="Instance must be running or stopped")
+
+    branch = body.branch or inst.version
+    module_name = body.module_name.strip()
+    repo_url = body.repo_url.strip()
+
+    if not module_name or not repo_url:
+        raise HTTPException(status_code=400, detail="repo_url and module_name are required")
+
+    # Check not already installed
+    config = dict(inst.config or {})
+    for ga in _get_git_addons(config):
+        if ga.get("type") == "marketplace" and ga.get("module_name") == module_name:
+            raise HTTPException(status_code=409, detail=f"Module {module_name} is already installed")
+
+    addon_id = f"mp-{module_name[:20]}-{uuid.uuid4().hex[:6]}"
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Extract repo name from URL
+    repo_name = repo_url.rstrip("/").rsplit("/", 1)[-1].replace(".git", "")
+
+    addon_entry = {
+        "id": addon_id,
+        "type": "marketplace",
+        "url": repo_url,
+        "repo_name": repo_name,
+        "module_name": module_name,
+        "branch": branch,
+        "auto_update": False,
+        "auto_install_requirements": False,
+        "auto_upgrade_modules": False,
+        "current_commit": "",
+        "status": "pending",
+        "error": "",
+        "added_at": now,
+        "modules": [],
+    }
+
+    git_addons = list(config.get("git_addons", []))
+    git_addons.append(addon_entry)
+    config["git_addons"] = git_addons
+    inst.config = config
+    flag_modified(inst, "config")
+    await db.commit()
+    await db.refresh(inst)
+
+    background_tasks.add_task(
+        _bg_marketplace_install,
+        inst.id, server.id, addon_id,
+        repo_url, module_name, branch,
+    )
+
+    return {"detail": f"Module {module_name} queued for installation", "addon_id": addon_id}
+
+
+@router.delete("/{instance_id}/marketplace/{addon_id}")
+async def uninstall_marketplace_module(
+    instance_id: str,
+    addon_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Remove a marketplace-installed module."""
+    inst, server = await _get_instance_and_server(instance_id, user["telegram_id"], db)
+
+    config = dict(inst.config or {})
+    git_addons = _get_git_addons(config)
+    addon = None
+    for ga in git_addons:
+        if ga.get("id") == addon_id and ga.get("type") == "marketplace":
+            addon = ga
+            break
+    if not addon:
+        raise HTTPException(status_code=404, detail="Marketplace module not found")
+
+    if addon.get("status") == "cloning":
+        raise HTTPException(status_code=400, detail="Cannot remove while installing")
+
+    config["git_addons"] = [ga for ga in git_addons if ga.get("id") != addon_id]
+    inst.config = config
+    flag_modified(inst, "config")
+    await db.commit()
+
+    background_tasks.add_task(_bg_remove_addon, inst.id, server.id, addon_id)
+
+    return {"detail": f"Module {addon.get('module_name', addon_id)} removal started"}
+
+
+@router.post("/{instance_id}/marketplace/rebuild")
+async def rebuild_marketplace_index(
+    instance_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Force rebuild the marketplace index for this instance's Odoo version."""
+    from core.marketplace import marketplace_service
+
+    result = await db.execute(
+        select(Instance).where(Instance.id == instance_id, Instance.owner_id == user["telegram_id"])
+    )
+    inst = result.scalar_one_or_none()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    branch = inst.version
+    if marketplace_service.is_building(branch):
+        return {"detail": f"Index for {branch} is already being built", "building": True}
+
+    async def _bg_rebuild():
+        try:
+            await marketplace_service.rebuild_index(branch)
+        except Exception as e:
+            logger.error(f"Marketplace index rebuild failed: {e}")
+
+    background_tasks.add_task(_bg_rebuild)
+    return {"detail": f"Rebuilding marketplace index for {branch}", "building": True}
+
+
+class UploadToGithub(BaseModel):
+    repo_name: str
+    description: str = ""
+
+
+@router.post("/{instance_id}/addons/upload-to-github")
+async def upload_addons_to_github(
+    instance_id: str,
+    body: UploadToGithub,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Create a private GitHub repo and push instance addons to it."""
+    from api.routes.github_oauth import get_github_token
+
+    gh_token = get_github_token(request)
+    if not gh_token:
+        raise HTTPException(status_code=401, detail="GitHub not connected")
+
+    inst, server = await _get_instance_and_server(instance_id, user["telegram_id"], db)
+
+    repo_name = body.repo_name.strip()
+    if not repo_name:
+        raise HTTPException(status_code=400, detail="Repository name is required")
+
+    # Create private repo via GitHub API
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            "https://api.github.com/user/repos",
+            headers={
+                "Authorization": f"token {gh_token}",
+                "Accept": "application/vnd.github.v3+json",
+            },
+            json={
+                "name": repo_name,
+                "description": body.description or f"Odoo addons managed by CRX Cloud",
+                "private": True,
+                "auto_init": True,
+            },
+        )
+        if resp.status_code == 422:
+            detail = resp.json().get("errors", [{}])[0].get("message", "Repository already exists")
+            raise HTTPException(status_code=409, detail=detail)
+        if resp.status_code not in (200, 201):
+            raise HTTPException(status_code=resp.status_code, detail="Failed to create GitHub repository")
+
+        repo_data = resp.json()
+        clone_url = repo_data.get("clone_url", "")
+        full_name = repo_data.get("full_name", "")
+        html_url = repo_data.get("html_url", "")
+
+    # Add as a git addon so it appears in the addons list
+    config = dict(inst.config or {})
+    addon_id = f"gh-{repo_name[:20]}-{uuid.uuid4().hex[:6]}"
+    now = datetime.now(timezone.utc).isoformat()
+
+    addon_entry = {
+        "id": addon_id,
+        "type": "git",
+        "url": clone_url,
+        "repo_name": repo_name,
+        "branch": inst.version or "main",
+        "auto_update": True,
+        "auto_install_requirements": False,
+        "auto_upgrade_modules": False,
+        "current_commit": "",
+        "status": "installed",
+        "error": "",
+        "added_at": now,
+        "modules": [],
+        "github_managed": True,
+    }
+
+    git_addons = list(config.get("git_addons", []))
+    git_addons.append(addon_entry)
+    config["git_addons"] = git_addons
+    inst.config = config
+    flag_modified(inst, "config")
+    await db.commit()
+
+    return {
+        "detail": f"Repository {full_name} created",
+        "addon_id": addon_id,
+        "repo_url": html_url,
+        "clone_url": clone_url,
+        "full_name": full_name,
+    }

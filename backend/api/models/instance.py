@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Integer, Enum as SAEnum, DateTime, ForeignKey, JSON, func
+from sqlalchemy import String, Integer, Boolean, Enum as SAEnum, DateTime, ForeignKey, JSON, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
@@ -22,7 +22,7 @@ class Instance(Base):
     )
     version: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(
-        SAEnum("running", "stopped", "deploying", "error", "updating", "upgrading", name="instance_status_enum"),
+        SAEnum("running", "stopped", "deploying", "error", "updating", "upgrading", "migrating", "cloning", "backing_up", name="instance_status_enum"),
         default="deploying",
     )
 
@@ -42,6 +42,11 @@ class Instance(Base):
     # CMS-specific config (plugins, modules, theme, etc.)
     config: Mapped[dict | None] = mapped_column(JSON, default=dict)
 
+    # Staging
+    is_staging: Mapped[bool] = mapped_column(Boolean, default=False)
+    parent_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("instances.id"), nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # Owner
     owner_id: Mapped[str | None] = mapped_column(String(36))
 
@@ -53,3 +58,4 @@ class Instance(Base):
     # Relationships
     server = relationship("Server", back_populates="instances")
     backups = relationship("Backup", back_populates="instance", cascade="all, delete-orphan")
+    staging_copies = relationship("Instance", backref="parent", remote_side=[id], foreign_keys=[parent_id])
